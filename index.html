@@ -94,7 +94,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .card3d:hover{z-index:5}
 .card3d:hover .inner{transform:translateY(-10px) scale(1.04)}
 .card3d.flipped:hover .inner{transform:rotateY(180deg) translateY(-10px) scale(1.04)}
-.fan{display:flex;justify-content:center;align-items:flex-end;flex-wrap:wrap;gap:12px;padding:26px 8px;min-height:270px}
+.fan{display:flex;justify-content:center;align-items:flex-end;flex-wrap:wrap;gap:38px 12px;padding:26px 8px 40px;min-height:270px}
 .fan .card3d{animation:dealIn .5s cubic-bezier(.2,.8,.3,1) backwards}
 @keyframes dealIn{from{opacity:0;transform:translateY(60px) rotate(6deg) scale(.8)}to{opacity:1;transform:none}}
 .cardlabel{position:absolute;left:0;right:0;bottom:-22px;text-align:center;font-size:12px;pointer-events:none}
@@ -388,6 +388,13 @@ tr:hover td{background:rgba(255,255,255,.02)}
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function toast(msg,err){const t=document.createElement("div");t.className="toast"+(err?" err":"");t.textContent=msg;$("#toasts").appendChild(t);setTimeout(()=>t.remove(),3200);}
+function imgRetry(el){const n=+(el.dataset.r||0);el.dataset.r=n+1;
+ const a=el.dataset.s0||"",b=el.dataset.s1||a;
+ if(!a){el.style.opacity=.15;return;}
+ const seq=[b, a+"?x="+Math.random().toString(36).slice(2,7), b+"?x="+Math.random().toString(36).slice(2,7), a+"?y="+Math.random().toString(36).slice(2,7)];
+ if(n<seq.length){setTimeout(()=>{el.src=seq[n];},600+900*n+Math.random()*400);}
+ else el.style.opacity=.15;}
+function cardImg(small,full,cls){return `<img ${cls?`class="${cls}"`:""} loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${small}" data-s0="${small}" data-s1="${full||small}" alt="" onerror="imgRetry(this)">`;}
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
 function hashSeed(str){let h=1779033703;for(let i=0;i<str.length;i++){h=Math.imul(h^str.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return h>>>0;}
 let RNG=Math.random;
@@ -531,13 +538,13 @@ function renderPool(){const q=($("#poolSearch").value||"").toLowerCase();const r
  const list=S.pool.filter(c=>(!q||c.name.toLowerCase().includes(q))&&(!rf||c.rarity===rf));
  $("#poolGrid").innerHTML=list.slice(0,400).map(c=>{const d=cardOf(c.name);
   return`<div class="slot" onclick="showCardModal('${esc(c.name).replace(/'/g,"\\'")}')">
-   <img class="thumb" loading="lazy" src="${d.imgS}" alt="" onerror="this.style.opacity=.2">
+   ${cardImg(d.imgS,d.img,"thumb")}
    <div class="nm">${esc(c.name)}<br><span class="rar ${rarKey(c.rarity)}">${esc(c.rarity)}</span></div></div>`;}).join("")
   +(list.length>400?`<p class="muted">…and ${list.length-400} more (search to narrow)</p>`:"");}
 $("#poolSearch").addEventListener("input",renderPool);
 $("#poolRarityFilter").addEventListener("change",renderPool);
 function showCardModal(name){const c=cardOf(name);
- openModal(`<div class="carddetail"><img src="${c.img}" alt="${esc(c.name)}">
+ openModal(`<div class="carddetail">${cardImg(c.img,c.imgS)}
   <div><h2 style="color:var(--ink)">${esc(c.name)}</h2>
   <p class="muted">${esc(c.type)} · ${esc(c.race||"")} ${c.attribute?"· "+esc(c.attribute):""}</p>
   <p style="margin:8px 0">${c.level?`Level/Rank ${c.level} · `:""}${c.atk!==null?`ATK ${c.atk}`:""} ${c.def!==null?`/ DEF ${c.def}`:""}</p>
@@ -745,7 +752,7 @@ function renderPackFan(reveal=false){const cp=S.currentPack;const panel=$("#pack
   return`<div class="card3d ${show?"flipped":""} ${rk==="secret"||rk==="ultra"?"secretGlow":""}" style="animation-delay:${i*70}ms" data-i="${i}" title="${show?esc(c.name):"Hidden"}">
    <div class="inner">
     <div class="face back"></div>
-    <div class="face front"><img loading="lazy" src="${d.imgS}" alt="" onerror="this.style.opacity=.15"></div>
+    <div class="face front">${cardImg(d.imgS,d.img)}</div>
    </div>
    <div class="cardlabel">${show?`<span class="rar ${rk}">${esc(c.rarity)}</span>`:"&nbsp;"}</div>
   </div>`;}).join("");
@@ -946,7 +953,7 @@ function renderCollBody(){const p=S.players[collSel];if(!p){$("#collBody").inner
  }else html=`<div class="binder">${binderSlots(items)}</div>`;
  $("#collBody").innerHTML=items.length?html:"<p class='muted'>Nothing here yet — win a pack to fill this binder.</p>";}
 function binderSlots(items){return items.map(x=>`<div class="slot" onclick="showCardModal('${esc(x.n).replace(/'/g,"\\'")}')">
- <img class="thumb" loading="lazy" src="${x.c.imgS}" alt="" onerror="this.style.opacity=.2">
+ ${cardImg(x.c.imgS,x.c.img,"thumb")}
  ${x.qty>1?`<span class="qty">×${x.qty}</span>`:""}
  <div class="nm">${esc(x.n)}</div></div>`).join("");}
 $("#collSearch").addEventListener("input",renderCollBody);
@@ -963,7 +970,7 @@ function openHistPack(i){const h=S.history[i];
   <p class="muted">Won by <b style="color:var(--gold)">${esc(h.winner)}</b> for ${fmt(h.bid)} ${esc(S.settings.currency)}</p>
   <div class="binder" style="margin-top:14px">${h.cards.map(c=>{const d=cardOf(c.name);
    return`<div class="slot" onclick="showCardModal('${esc(c.name).replace(/'/g,"\\'")}')">
-    <img class="thumb" src="${d.imgS}" onerror="this.style.opacity=.2">
+    ${cardImg(d.imgS,d.img,"thumb")}
     <div class="nm">${esc(c.name)}<br><span class="rar ${rarKey(c.rarity)}">${esc(c.rarity)}</span></div></div>`;}).join("")}</div>`);}
 
 /* ================= SCOREBOARD & STATS ================= */
@@ -1045,8 +1052,10 @@ $("#btnHostRoom").addEventListener("click",async()=>{
  NET.role="host";NET.code=Array.from({length:4},()=>"ABCDEFGHJKMNPQRSTUVWXYZ23456789"[Math.floor(Math.random()*31)]).join("");
  roomRef("actions").on("child_added",snap=>{applyAction(snap.val());snap.ref.remove();});
  roomRef("claims").on("value",snap=>renderRoster(snap.val()||{}));
- publishState();
- }catch(e){NET.role=null;return toast("Room setup failed: "+String(e.message||e).slice(0,90),true);}
+ await roomRef("state").set(JSON.parse(JSON.stringify(buildMirror())));
+ }catch(e){NET.role=null;
+  const msg=/permission/i.test(String(e))?"Database locked — your Firebase test-mode rules have expired. Firebase console → Realtime Database → Rules → extend the dates → Publish.":"Room setup failed: "+String(e.message||e).slice(0,90);
+  return toast(msg,true);}
  $("#roomCodePill").hidden=false;$("#roomCodePill").textContent="Room "+NET.code;
  $("#btnCopyInvite").hidden=false;$("#btnLeaveRoom").hidden=false;$("#btnHostRoom").disabled=true;
  toast("Room "+NET.code+" is live — send friends the invite link");});
@@ -1097,9 +1106,11 @@ $("#btnJoinRoom").addEventListener("click",async()=>{
 async function clientJoin(cfg,code){
  try{await netInit(cfg);}catch(e){return toast("Couldn't load Firebase",true);}
  NET.role="client";NET.code=code;
+ $("#auctionStage").innerHTML=`<p class="muted" style="padding:40px 0">Connecting to room ${esc(code)}…</p>`;
  roomRef("state").on("value",snap=>{const m=snap.val();
   if(!m){$("#auctionStage").innerHTML=`<p class="muted" style="padding:40px 0">Room ${esc(code)} not found (or host closed it).</p>`;return;}
-  onMirror(m);});
+  onMirror(m);},
+ err=>{$("#auctionStage").innerHTML=`<p style="padding:40px 0;color:var(--danger)">Can't read this room — the host's Firebase database rules have expired.<br><span class="muted">Host fixes it in the Firebase console: Realtime Database → Rules → extend the dates → Publish. Then refresh this page.</span></p>`;});
  switchView("draft");
  $("#wheelPanel").style.display="none";
  $("#draftSub").textContent="Live draft — room "+code;
