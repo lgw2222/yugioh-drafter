@@ -193,10 +193,27 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="field"><label>Number of packs</label><input type="number" id="setNumPacks" min="1" value="24"></div>
         <div class="field"><label>Random seed (optional)</label><input type="text" id="setSeed" placeholder="blank = random"></div>
       </div>
-      <h3 style="margin-top:8px">Rarity slots per pack</h3>
-      <p class="muted" style="font-size:14px;margin-bottom:8px">Guaranteed pulls by rarity. Remaining slots fill randomly from the whole pool.</p>
-      <div id="rarityRows"></div>
-      <button class="btn small" id="btnAddRarity">+ Add rarity slot</button>
+      <h3 style="margin-top:8px">Rarity rules</h3>
+      <div class="row" style="margin-bottom:8px">
+        <label class="row" style="gap:6px;font-size:15px"><input type="radio" name="rmode" value="slots" id="rmSlots"> Guaranteed slots</label>
+        <label class="row" style="gap:6px;font-size:15px"><input type="radio" name="rmode" value="percent" id="rmPct"> Percentage odds</label>
+      </div>
+      <label class="row" style="gap:6px;font-size:15px;margin-bottom:10px"><input type="checkbox" id="setSimpleRar"> Simple rarities only <span class="muted" style="font-size:13px">(fold Starlight/Prismatic/Collector's etc. into Common → Secret)</span></label>
+      <div id="slotsBox">
+        <p class="muted" style="font-size:14px;margin-bottom:8px">Guaranteed pulls by rarity. Remaining slots fill randomly from the pack source.</p>
+        <div id="rarityRows"></div>
+        <button class="btn small" id="btnAddRarity">+ Add rarity slot</button>
+        <div style="margin-top:8px"><span class="pill" id="slotTotal">—</span></div>
+      </div>
+      <div id="pctBox" hidden>
+        <p class="muted" style="font-size:14px;margin-bottom:8px">Each card slot rolls against these odds. Rarities not listed never appear.</p>
+        <div id="pctRows"></div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn small" id="btnAddPct">+ Add rarity</button>
+          <button class="btn small" id="btnNormPct">Normalize to 100%</button>
+          <span class="pill" id="pctTotal">—</span>
+        </div>
+      </div>
       <div style="margin-top:16px" class="row">
         <span class="pill" id="poolInfo">Pool: 0 cards</span>
         <span class="pill" id="packInfo">Packs remaining: —</span>
@@ -274,6 +291,31 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div id="fetchProblems" style="margin-top:10px"></div>
   </div>
   <div class="panel" style="margin-top:18px">
+    <h3>Pack Sources</h3>
+    <p class="muted" style="font-size:14px;margin-bottom:10px">Add real booster sets or eras as separate pack sources. On the Draft tab you can spin a source wheel (random set/era per pack), lock one source, or just use your imported pool. Each source keeps its own remaining cards.</p>
+    <div class="row" style="margin-bottom:10px">
+      <select id="srcKind" style="min-width:190px">
+        <option value="set">Booster set…</option>
+        <option value="goat">Goat Format</option>
+        <option value="edison">Edison Format</option>
+        <option value="dm">DM Era</option>
+        <option value="gx">GX Era</option>
+        <option value="syn">Synchro Era</option>
+        <option value="xyz">XYZ Era</option>
+        <option value="pen">Pendulum Era</option>
+        <option value="link">Link Era</option>
+      </select>
+      <input type="text" id="srcSet" list="setList" placeholder="Set name (start typing…)" style="flex:1;min-width:200px" onfocus="loadSetList()">
+      <button class="btn gold" id="btnAddSource">Add source</button>
+      <button class="btn" id="btnBrowseSets">Browse all sets…</button>
+    </div>
+    <div class="row" style="margin-bottom:10px">
+      <span class="muted" style="font-size:13px">Classics:</span>
+      <span id="classicSets"></span>
+    </div>
+    <div id="srcList"></div>
+  </div>
+  <div class="panel" style="margin-top:18px">
     <div class="row" style="margin-bottom:12px">
       <input type="search" id="poolSearch" placeholder="Search pool…" style="flex:1;min-width:200px">
       <select id="poolRarityFilter"><option value="">All rarities</option></select>
@@ -313,6 +355,26 @@ tr:hover td{background:rgba(255,255,255,.02)}
         </div>
         <div style="margin-top:10px"><b class="muted" style="font-size:13px">SPIN HISTORY:</b> <span id="spinHistory" class="muted" style="font-size:13px"></span></div>
       </details>
+    </div>
+    <div class="panel" id="sourcePanel">
+      <h3>Pack Source</h3>
+      <div class="row" style="margin-bottom:10px">
+        <select id="srcMode">
+          <option value="pool">Use imported pool</option>
+          <option value="fixed">Lock one source</option>
+          <option value="wheel">Spin the source wheel</option>
+        </select>
+        <select id="srcFixed" hidden></select>
+      </div>
+      <div id="srcWheelWrap" hidden>
+        <div class="wheel-wrap" style="width:min(300px,72vw)">
+          <div class="wheel-pointer"></div>
+          <canvas id="srcCanvas" width="700" height="700"></canvas>
+          <div class="wheel-hub" id="srcHub" role="button" tabindex="0" style="width:54px;height:54px;font-size:11px">SPIN</div>
+        </div>
+        <div class="wheel-result" id="srcResult" style="font-size:18px"></div>
+      </div>
+      <p class="muted" id="srcNote" style="font-size:14px"></p>
     </div>
     <div class="panel">
       <div class="auction-stage" id="auctionStage">
@@ -401,7 +463,22 @@ let RNG=Math.random;
 function shuffle(arr,rng=RNG){const a=arr.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 const fmt=n=>Number(n).toLocaleString();
 function download(name,text,mime="text/plain"){const b=new Blob([text],{type:mime});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
-function rarKey(r){r=(r||"common").toLowerCase();if(r.includes("secret"))return"secret";if(r.includes("ultimate"))return"ultimate";if(r.includes("ghost")||r.includes("holo"))return"ghost";if(r.includes("ultra"))return"ultra";if(r.includes("super"))return"super";if(r.includes("rare"))return"rare";return"common";}
+const SIMPLE_RARITIES=["Common","Rare","Super Rare","Ultra Rare","Secret Rare"];
+function simplifyRarity(r){const t=(r||"").toLowerCase();
+ // premium/chase printings all fold to the top tier
+ if(/starlight|prismatic|collector|quarter century|ghost|ultimate|platinum|secret/.test(t))return"Secret Rare";
+ if(/ultra|gold|parallel/.test(t))return"Ultra Rare";
+ if(/super/.test(t))return"Super Rare";
+ if(/rare/.test(t))return"Rare";
+ return"Common";}
+function normRar(r){return S.pack.simpleRarities?simplifyRarity(r):r;}
+function rarKey(r){r=(r||"common").toLowerCase();
+ if(r.includes("starlight")||r.includes("prismatic")||r.includes("collector")||r.includes("quarter century"))return"secret";
+ if(r.includes("secret"))return"secret";
+ if(r.includes("ultimate"))return"ultimate";
+ if(r.includes("ghost")||r.includes("holo"))return"ghost";
+ if(r.includes("ultra"))return"ultra";if(r.includes("super"))return"super";
+ if(r.includes("rare"))return"rare";return"common";}
 
 /* ================= STATE ================= */
 const DEFAULT_WHEEL=[
@@ -413,7 +490,10 @@ let S=null;
 function freshState(){return{
  settings:{numPlayers:4,startMoney:1000,currency:"Gold",timer:20,speedTimer:6,dutchStart:200,dutchStep:10,dutchInt:2},
  players:[], pool:[], cardDB:{},
- pack:{cpp:8,num:24,seed:"",slots:[{rarity:"Secret Rare",count:1},{rarity:"Ultra Rare",count:1}]},
+ pack:{cpp:8,num:24,seed:"",slots:[{rarity:"Secret Rare",count:1},{rarity:"Ultra Rare",count:1}],
+  rarityMode:"slots",simpleRarities:false,
+  percents:[{rarity:"Common",pct:70},{rarity:"Rare",pct:16},{rarity:"Super Rare",pct:8},{rarity:"Ultra Rare",pct:4},{rarity:"Secret Rare",pct:2}]},
+ sources:{mode:"pool",fixed:"",entries:[]}, sourceCache:{}, finished:false,
  packsOpened:0, currentPack:null, pendingAuction:null,
  wheel:{entries:JSON.parse(JSON.stringify(DEFAULT_WHEEL)),sound:true,history:[]},
  wheelPresets:{}, history:[], rngState:null };}
@@ -434,14 +514,14 @@ function load(){const raw=store.get("yadm_state");if(raw){try{S=Object.assign(fr
 $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;switchView(b.dataset.view);});
 function switchView(v){$$("#tabs button").forEach(b=>b.classList.toggle("active",b.dataset.view===v));
  $$("section.view").forEach(s=>s.classList.toggle("on",s.id==="view-"+v));
- if(v==="collections")renderCollections(); if(v==="history")renderHistory(); if(v==="stats")renderStats(); if(v==="export")renderExport(); if(v==="cards")renderPool(); if(v==="draft")drawWheel();}
+ if(v==="collections")renderCollections(); if(v==="history")renderHistory(); if(v==="stats")renderStats(); if(v==="export")renderExport(); if(v==="cards"){renderPool();renderSources();renderClassics();} if(v==="draft"){drawWheel();renderSourceControls();}}
 
 /* ================= SETUP ================= */
 function renderSetup(){const st=S.settings;
  $("#setPlayers").value=st.numPlayers;$("#setMoney").value=st.startMoney;$("#setCurrency").value=st.currency;
  $("#setTimer").value=st.timer;$("#setSpeedTimer").value=st.speedTimer;
  $("#setDutchStart").value=st.dutchStart;$("#setDutchStep").value=st.dutchStep;$("#setDutchInt").value=st.dutchInt;
- renderNameInputs(); renderRarityRows(); renderPackInfo();
+ renderNameInputs(); renderRarityMode(); renderPackInfo(); renderSources(); renderSourceControls();
  $("#setCPP").value=S.pack.cpp;$("#setNumPacks").value=S.pack.num;$("#setSeed").value=S.pack.seed;}
 function renderNameInputs(){const n=Math.min(12,Math.max(2,+$("#setPlayers").value||4));let html="<h3 style='margin-top:10px'>Duelists</h3><div class='grid3'>";
  for(let i=0;i<n;i++){const nm=S.players[i]?.name||`Player ${i+1}`;html+=`<div class="field"><label>Player ${i+1}</label><input type="text" class="pname" value="${esc(nm)}"></div>`;}
@@ -460,20 +540,56 @@ $("#btnApplySetup").addEventListener("click",()=>{
 $("#btnResetDraft").addEventListener("click",()=>{
  if(!confirm("Reset the entire draft? Collections, money, and history will be wiped. The card pool and wheel are kept."))return;
  const pool=S.pool,db=S.cardDB,wheel=S.wheel,presets=S.wheelPresets,pack=S.pack,settings=S.settings;
- S=freshState();S.pool=pool;S.cardDB=db;S.wheel=wheel;S.wheelPresets=presets;S.pack=pack;S.settings=settings;
+ const srcs=S.sources;S=freshState();S.pool=pool;S.cardDB=db;S.wheel=wheel;S.wheelPresets=presets;S.pack=pack;S.settings=settings;S.sources=srcs;
  S.players=Array.from({length:settings.numPlayers},(_,i)=>({name:`Player ${i+1}`,money:settings.startMoney,spent:0,bids:[],cards:[]}));
  initRng();save();renderSetup();renderAuctionIdle();toast("Draft reset");});
 function initRng(){if(S.pack.seed){RNG=mulberry32(hashSeed(S.pack.seed));}else{RNG=Math.random;}}
 
 /* rarity slot rows */
+/* ---------- rarity mode UI ---------- */
+function renderRarityMode(){
+ const pct=S.pack.rarityMode==="percent";
+ $("#rmSlots").checked=!pct;$("#rmPct").checked=pct;
+ $("#slotsBox").hidden=pct;$("#pctBox").hidden=!pct;
+ $("#setSimpleRar").checked=!!S.pack.simpleRarities;
+ renderRarityRows();renderPctRows();}
+$$("input[name=rmode]").forEach(r=>r.addEventListener("change",e=>{S.pack.rarityMode=e.target.value;save();renderRarityMode();}));
+$("#setSimpleRar").addEventListener("change",e=>{S.pack.simpleRarities=e.target.checked;save();renderRarityMode();renderPool();
+ toast(e.target.checked?"Exotic rarities folded into the 5 classics":"Full printed rarities restored");});
+function renderPctRows(){const box=$("#pctRows");if(!box)return;box.innerHTML="";
+ S.pack.percents.forEach((p,i)=>{const d=document.createElement("div");d.className="row";d.style.marginBottom="6px";
+  d.innerHTML=`<input type="text" value="${esc(p.rarity)}" data-i="${i}" data-k="rarity" list="rarSuggest" style="width:170px">
+   <input type="number" min="0" max="100" step="0.5" value="${p.pct}" data-i="${i}" data-k="pct" style="width:80px"><span class="muted">%</span>
+   <button class="btn small danger" data-del="${i}">✕</button>`;box.appendChild(d);});
+ if(!$("#rarSuggest")){const dl=document.createElement("datalist");dl.id="rarSuggest";
+  dl.innerHTML=SIMPLE_RARITIES.map(r=>`<option value="${r}">`).join("");document.body.appendChild(dl);}
+ const tot=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
+ const el=$("#pctTotal");el.textContent=`Total: ${tot.toFixed(1)}%`;
+ el.style.color=Math.abs(tot-100)<0.05?"var(--ok)":"var(--danger)";
+ box.oninput=e=>{const i=+e.target.dataset.i,k=e.target.dataset.k;if(!k)return;
+  S.pack.percents[i][k]=k==="pct"?Math.max(0,+e.target.value||0):e.target.value;save();
+  const t=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
+  const q=$("#pctTotal");q.textContent=`Total: ${t.toFixed(1)}%`;q.style.color=Math.abs(t-100)<0.05?"var(--ok)":"var(--danger)";};
+ box.onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){S.pack.percents.splice(+d,1);renderPctRows();save();}};}
+$("#btnAddPct").addEventListener("click",()=>{S.pack.percents.push({rarity:"Common",pct:0});renderPctRows();save();});
+$("#btnNormPct").addEventListener("click",()=>{const t=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
+ if(!t)return toast("Set some values first",true);
+ S.pack.percents.forEach(p=>p.pct=Math.round((+p.pct||0)/t*1000)/10);save();renderPctRows();toast("Normalized to 100%");});
+
 function renderRarityRows(){const box=$("#rarityRows");box.innerHTML="";
  S.pack.slots.forEach((s,i)=>{const d=document.createElement("div");d.className="row";d.style.marginBottom="6px";
   d.innerHTML=`<input type="text" value="${esc(s.rarity)}" data-i="${i}" data-k="rarity" style="width:170px">
    <input type="number" min="1" value="${s.count}" data-i="${i}" data-k="count" style="width:70px">
    <button class="btn small danger" data-del="${i}">✕</button>`;box.appendChild(d);});
  box.oninput=e=>{const i=+e.target.dataset.i,k=e.target.dataset.k;if(k==="rarity")S.pack.slots[i].rarity=e.target.value;if(k==="count")S.pack.slots[i].count=Math.max(1,+e.target.value||1);save();};
- box.onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){S.pack.slots.splice(+d,1);renderRarityRows();save();}};}
+ box.onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){S.pack.slots.splice(+d,1);renderRarityRows();save();}};
+ updateSlotTotal();}
+function updateSlotTotal(){const el=$("#slotTotal");if(!el)return;
+ const t=S.pack.slots.reduce((a,x)=>a+(+x.count||0),0),cpp=S.pack.cpp;
+ if(t>cpp){el.textContent=`${t} guaranteed / ${cpp} per pack — too many, extras are dropped`;el.style.color="var(--danger)";}
+ else{el.textContent=`${t} guaranteed / ${cpp} per pack — ${cpp-t} random`;el.style.color="var(--ink-dim)";}}
 $("#btnAddRarity").addEventListener("click",()=>{S.pack.slots.push({rarity:"Rare",count:1});renderRarityRows();save();});
+$("#setCPP").addEventListener("input",()=>{S.pack.cpp=Math.max(1,+$("#setCPP").value||8);updateSlotTotal();});
 function renderPackInfo(){$("#poolInfo").textContent=`Pool: ${S.pool.length} cards left`;
  $("#packInfo").textContent=`Packs: ${S.packsOpened} opened / ${S.pack.num} planned`;}
 
@@ -578,11 +694,113 @@ function libFormat(fmt,label){libImport(API+"cardinfo.php?format="+encodeURIComp
 function libEra(from,to,label){libImport(API+`cardinfo.php?startdate=${from}&enddate=${to}&dateregion=tcg_date`,label);}
 function libCardset(){const s=$("#libSet").value.trim();if(!s)return toast("Type a set name first",true);
  libImport(API+"cardinfo.php?cardset="+encodeURIComponent(s),s,s);}
-let SETLIST=null;
-async function loadSetList(){if(SETLIST)return;SETLIST=[];
+let SETLIST=null,SETMETA=[];
+async function loadSetList(){if(SETLIST&&SETLIST.length)return;SETLIST=[];
  try{const r=await fetch(API+"cardsets.php");const j=await r.json();
-  SETLIST=(Array.isArray(j)?j:[]).map(x=>x.set_name).sort();
-  $("#setList").innerHTML=SETLIST.map(n=>`<option value="${esc(n)}">`).join("");}catch(e){}}
+  SETMETA=(Array.isArray(j)?j:[]).filter(x=>x&&x.set_name).sort((a,b)=>a.set_name.localeCompare(b.set_name));
+  SETLIST=SETMETA.map(x=>x.set_name);
+  $("#setList").innerHTML=SETLIST.map(n=>`<option value="${esc(n)}">`).join("");}catch(e){SETLIST=[];}}
+/* ---------- pack source management ---------- */
+const SRC_COLORS=["#e8c15a","#8f7cff","#4fd8e8","#ff8c5a","#7ef0c0","#ff5f6e","#6ec1ff","#ff9ff5"];
+$("#srcKind").addEventListener("change",e=>{$("#srcSet").style.display=e.target.value==="set"?"":"none";});
+$("#btnAddSource").addEventListener("click",()=>{
+ const kind=$("#srcKind").value;let entry;
+ if(kind==="set"){const nm=$("#srcSet").value.trim();if(!nm)return toast("Type a set name first",true);
+  entry={label:nm,kind:"set",setName:nm,q:"cardset="+encodeURIComponent(nm)};}
+ else{const p=SRC_PRESETS[kind];entry={label:p.label,kind:"era",q:p.q};}
+ if(S.sources.entries.some(e=>e.label===entry.label))return toast("Already a source",true);
+ entry.color=SRC_COLORS[S.sources.entries.length%SRC_COLORS.length];entry.weight=1;
+ S.sources.entries.push(entry);save();renderSources();renderSourceControls();drawSourceWheel();
+ toast(`Added ${entry.label} — cards load when first drafted`);});
+const CLASSIC_SETS=["Legend of Blue Eyes White Dragon","Metal Raiders","Magic Ruler","Pharaoh's Servant",
+ "Labyrinth of Nightmare","Legacy of Darkness","Pharaonic Guardian","Invasion of Chaos","Ancient Sanctuary",
+ "Soul of the Duelist","Flaming Eternity","The Lost Millennium","Cybernetic Revolution","Elemental Energy",
+ "Shadow of Infinity","Enemy of Justice","Strike of Neos","Gladiator's Assault","Light of Destruction",
+ "The Duelist Genesis","Crossroads of Chaos","Ancient Prophecy","Stardust Overdrive","Absolute Powerforce"];
+function renderClassics(){const el=$("#classicSets");if(!el)return;
+ el.innerHTML=CLASSIC_SETS.slice(0,10).map(n=>`<button class="btn small" style="margin:2px" onclick="addSetSource('${esc(n).replace(/'/g,"\\'")}')">${esc(n.replace(/ White Dragon| of the Duelist/,""))}</button>`).join("");}
+function addSetSource(name){
+ if(S.sources.entries.some(e=>e.label===name))return toast(`${name} is already a source`,true);
+ const entry={label:name,kind:"set",setName:name,q:"cardset="+encodeURIComponent(name),
+  color:SRC_COLORS[S.sources.entries.length%SRC_COLORS.length],weight:1};
+ S.sources.entries.push(entry);save();renderSources();renderSourceControls();drawSourceWheel();
+ toast(`Added ${name}`);}
+async function browseSets(){
+ openModal(`<h2 style="color:var(--ink)">Booster sets</h2><p class="muted">Loading the full set list…</p>`);
+ await loadSetList();
+ if(!SETLIST||!SETLIST.length)return openModal(`<h2>Couldn't load sets</h2><p class="muted">Check your connection and try again.</p>`);
+ const rows=SETMETA.length?SETMETA:SETLIST.map(n=>({set_name:n}));
+ openModal(`<h2 style="color:var(--ink)">Booster sets <span class="pill">${rows.length}</span></h2>
+  <p class="muted">Click any set to add it as a pack source. Add as many as you like.</p>
+  <input type="search" id="setFilter" placeholder="Search sets…" style="width:100%;margin:12px 0" autofocus>
+  <div id="setRows" style="max-height:52vh;overflow:auto"></div>`);
+ const draw=q=>{const f=rows.filter(r=>!q||r.set_name.toLowerCase().includes(q)).slice(0,300);
+  $("#setRows").innerHTML=f.length?`<table><tbody>${f.map(r=>{
+   const added=S.sources.entries.some(e=>e.label===r.set_name);
+   return`<tr><td>${esc(r.set_name)}</td><td class="muted" style="font-size:13px">${r.num_of_cards?r.num_of_cards+" cards":""}${r.tcg_date?" · "+String(r.tcg_date).slice(0,4):""}</td>
+    <td style="text-align:right"><button class="btn small ${added?"":"gold"}" ${added?"disabled":""} onclick="addSetSource('${esc(r.set_name).replace(/'/g,"\\'")}');this.disabled=true;this.classList.remove('gold');this.textContent='Added'">${added?"Added":"Add"}</button></td></tr>`;}).join("")}</tbody></table>`
+   :`<p class="muted">No sets match that.</p>`;};
+ draw("");
+ $("#setFilter").oninput=e=>draw(e.target.value.toLowerCase().trim());}
+$("#btnBrowseSets").addEventListener("click",browseSets);
+
+function renderSources(){const box=$("#srcList");if(!box)return;
+ if(!S.sources.entries.length){box.innerHTML=`<p class="muted">No sources yet — packs come from your imported pool.</p>`;return;}
+ box.innerHTML=S.sources.entries.map((e,i)=>`<div class="entry-row">
+   <input type="color" value="${e.color}" data-i="${i}" data-k="color">
+   <span>${esc(e.label)} <span class="muted" style="font-size:13px">${S.sourceCache[e.label]?`· ${S.sourceCache[e.label].length} left`:"· loads on first use"}</span></span>
+   <input type="number" min="1" title="Wheel weight" value="${e.weight}" data-i="${i}" data-k="weight">
+   <button class="btn small danger" data-del="${i}">✕</button></div>`).join("");
+ box.oninput=e=>{const i=+e.target.dataset.i,k=e.target.dataset.k;if(!k)return;
+  S.sources.entries[i][k]=k==="weight"?Math.max(1,+e.target.value||1):e.target.value;save();drawSourceWheel();};
+ box.onclick=e=>{const d=e.target.dataset.del;if(d===undefined)return;
+  const lab=S.sources.entries[+d].label;S.sources.entries.splice(+d,1);delete S.sourceCache[lab];
+  save();renderSources();renderSourceControls();drawSourceWheel();};}
+
+/* ---------- source wheel + mode controls (Draft tab) ---------- */
+let srcAngle=0,srcSpinning=false,srcChoiceEntry=null;
+$("#srcMode").addEventListener("change",e=>{S.sources.mode=e.target.value;save();renderSourceControls();});
+$("#srcFixed").addEventListener("change",e=>{S.sources.fixed=e.target.value;save();renderSourceNote();});
+function renderSourceControls(){
+ const has=S.sources.entries.length>0;
+ $("#srcMode").value=S.sources.mode;
+ $("#srcFixed").hidden=S.sources.mode!=="fixed";
+ $("#srcFixed").innerHTML=S.sources.entries.map(e=>`<option ${e.label===S.sources.fixed?"selected":""}>${esc(e.label)}</option>`).join("");
+ $("#srcWheelWrap").hidden=S.sources.mode!=="wheel";
+ if(S.sources.mode==="wheel")drawSourceWheel();
+ if(!has&&S.sources.mode!=="pool"){S.sources.mode="pool";$("#srcMode").value="pool";$("#srcWheelWrap").hidden=true;$("#srcFixed").hidden=true;}
+ renderSourceNote();}
+function renderSourceNote(){const el=$("#srcNote");if(!el)return;
+ const m=S.sources.mode;
+ if(!S.sources.entries.length){el.textContent=`Imported pool: ${S.pool.length} cards left. Add booster sets or eras on the Cards tab to unlock the source wheel.`;return;}
+ if(m==="pool")el.textContent=`Imported pool: ${S.pool.length} cards left.`;
+ else if(m==="fixed")el.textContent=`Every pack comes from ${S.sources.fixed||S.sources.entries[0].label}.`;
+ else el.textContent=srcChoiceEntry?`Next pack comes from ${srcChoiceEntry.label}.`:`Spin to pick which set or era the next pack comes from.`;}
+function drawSourceWheel(){const cv=$("#srcCanvas");if(!cv||!S.sources.entries.length)return;
+ drawWheelOn(cv,S.sources.entries,srcAngle);}
+function spinSourceWheel(){if(srcSpinning||!S.sources.entries.length)return;srcSpinning=true;srcChoiceEntry=null;
+ $("#srcResult").textContent="";
+ const ents=S.sources.entries,tw=ents.reduce((a,e)=>a+(+e.weight||1),0);
+ let r=Math.random()*tw,idx=0;
+ for(let i=0;i<ents.length;i++){r-=(+ents[i].weight||1);if(r<=0){idx=i;break;}}
+ let start=0;for(let i=0;i<idx;i++)start+=(+ents[i].weight||1)/tw*Math.PI*2;
+ const sweep=(+ents[idx].weight||1)/tw*Math.PI*2;
+ const target=start+sweep*(0.2+Math.random()*0.6);
+ let final=-Math.PI/2-target;const cur=srcAngle%(Math.PI*2);
+ while(final<cur)final+=Math.PI*2;
+ final+=Math.PI*2*(3+Math.floor(Math.random()*3));
+ const from=srcAngle,delta=final-from,dur=3400,t0=performance.now();let last=-1;
+ function frame(t){const p=Math.min(1,(t-t0)/dur),ease=1-Math.pow(1-p,3);
+  srcAngle=from+delta*ease;drawSourceWheel();
+  const seg=Math.floor(((srcAngle%(Math.PI*2))+Math.PI*2)/(Math.PI*2)*24);
+  if(seg!==last){last=seg;beep(520+Math.random()*60,.03,.04);}
+  if(p<1)requestAnimationFrame(frame);
+  else{srcSpinning=false;srcChoiceEntry=ents[idx];$("#srcResult").textContent=ents[idx].label;
+   fanfare();renderSourceNote();}}
+ requestAnimationFrame(frame);}
+$("#srcHub").addEventListener("click",spinSourceWheel);
+$("#srcHub").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")spinSourceWheel();});
+
 function downloadPoolCSV(){if(!S.pool.length)return toast("Pool is empty",true);
  const rows=[["name","rarity"],...S.pool.map(c=>[c.name,c.rarity])];
  download("draft-pool.csv",rows.map(r=>r.map(x=>/[",\n]/.test(x)?`"${String(x).replace(/"/g,'""')}"`:x).join(",")).join("\n"),"text/csv");
@@ -647,11 +865,12 @@ function fanfare(){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,.18,.
 /* ================= WHEEL ================= */
 let wheelAngle=0,spinning=false,wheelChoice=null;
 function totalWeight(){return S.wheel.entries.reduce((a,e)=>a+(+e.weight||1),0);}
-function drawWheel(){const cv=$("#wheelCanvas");if(!cv)return;const ctx=cv.getContext("2d");
+function drawWheel(){const cv=$("#wheelCanvas");if(!cv)return;drawWheelOn(cv,S.wheel.entries,wheelAngle);}
+function drawWheelOn(cv,entries,angle){if(!cv||!entries||!entries.length)return;const ctx=cv.getContext("2d");
  const W=cv.width,R=W/2-10,cx=W/2,cy=W/2;ctx.clearRect(0,0,W,W);
- const tw=totalWeight();let a=wheelAngle;
+ const tw=entries.reduce((a,e)=>a+(+e.weight||1),0)||1;let a=angle;
  ctx.save();
- S.wheel.entries.forEach(e=>{const sweep=(+e.weight||1)/tw*Math.PI*2;
+ entries.forEach(e=>{const sweep=(+e.weight||1)/tw*Math.PI*2;
   ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,R,a,a+sweep);ctx.closePath();
   ctx.fillStyle=e.color;ctx.fill();ctx.strokeStyle="#0a0d18";ctx.lineWidth=4;ctx.stroke();
   ctx.save();ctx.translate(cx,cy);ctx.rotate(a+sweep/2);ctx.textAlign="right";ctx.fillStyle="#0b0e1a";
@@ -711,25 +930,67 @@ $("#presetSelect").addEventListener("change",e=>{const k=e.target.value;if(!k)re
 $("#btnDelPreset").addEventListener("click",()=>{const k=$("#presetSelect").value;if(!k)return;delete S.wheelPresets[k];save();renderPresetSelect();toast("Preset deleted");});
 
 /* ================= PACK GENERATION ================= */
-function generatePack(){const cpp=S.pack.cpp;if(S.pool.length===0)return null;
- const pack=[];const pool=S.pool;
- const byRar={};pool.forEach((c,i)=>{const k=c.rarity.toLowerCase();(byRar[k]=byRar[k]||[]).push(i);});
- const taken=new Set();
+function buildPack(pool){const cpp=S.pack.cpp;if(!pool||!pool.length)return null;
+ const pack=[];const taken=new Set();
+ const byRar={};pool.forEach((c,i)=>{const k=normRar(c.rarity).toLowerCase();(byRar[k]=byRar[k]||[]).push(i);});
  function takeIdx(i){taken.add(i);pack.push(pool[i]);}
- for(const slot of S.pack.slots){const k=slot.rarity.toLowerCase();const cand=(byRar[k]||[]).filter(i=>!taken.has(i));
-  const picks=shuffle(cand).slice(0,slot.count);picks.forEach(takeIdx);if(pack.length>=cpp)break;}
- const rest=pool.map((_,i)=>i).filter(i=>!taken.has(i));
- shuffle(rest).slice(0,Math.max(0,cpp-pack.length)).forEach(takeIdx);
- S.pool=pool.filter((_,i)=>!taken.has(i));
- return shuffle(pack);}
+ if(S.pack.rarityMode==="percent"){
+  const list=S.pack.percents.filter(p=>p.rarity&&+p.pct>0);
+  const total=list.reduce((a,p)=>a+ +p.pct,0)||1;
+  for(let n=0;n<cpp;n++){
+   let r=RNG()*total,pick=list[0];
+   for(const p of list){r-=+p.pct;if(r<=0){pick=p;break;}}
+   let cand=pick?(byRar[pick.rarity.toLowerCase()]||[]).filter(i=>!taken.has(i)):[];
+   if(!cand.length)cand=pool.map((_,i)=>i).filter(i=>!taken.has(i)); // rarity exhausted → any card
+   if(!cand.length)break;
+   takeIdx(cand[Math.floor(RNG()*cand.length)]);}
+ }else{
+  for(const slot of S.pack.slots){const k=(slot.rarity||"").toLowerCase();const cand=(byRar[k]||[]).filter(i=>!taken.has(i));
+   const picks=shuffle(cand).slice(0,slot.count);picks.forEach(takeIdx);if(pack.length>=cpp)break;}
+  const rest=pool.map((_,i)=>i).filter(i=>!taken.has(i));
+  shuffle(rest).slice(0,Math.max(0,cpp-pack.length)).forEach(takeIdx);}
+ return{cards:shuffle(pack),rest:pool.filter((_,i)=>!taken.has(i))};}
+
+/* ---------- pack sources ---------- */
+const SRC_PRESETS={goat:{label:"Goat Format",q:"format=goat"},edison:{label:"Edison Format",q:"format=edison"},
+ dm:{label:"DM Era",q:"startdate=2002-03-01&enddate=2004-10-01&dateregion=tcg_date"},
+ gx:{label:"GX Era",q:"startdate=2004-10-01&enddate=2008-09-02&dateregion=tcg_date"},
+ syn:{label:"Synchro Era",q:"startdate=2008-09-02&enddate=2011-07-08&dateregion=tcg_date"},
+ xyz:{label:"XYZ Era",q:"startdate=2011-07-08&enddate=2014-08-08&dateregion=tcg_date"},
+ pen:{label:"Pendulum Era",q:"startdate=2014-08-08&enddate=2017-08-01&dateregion=tcg_date"},
+ link:{label:"Link Era",q:"startdate=2017-08-01&enddate=2020-04-01&dateregion=tcg_date"}};
+async function ensureSource(entry){
+ if(S.sourceCache[entry.label]&&S.sourceCache[entry.label].length)return S.sourceCache[entry.label];
+ toast(`Loading ${entry.label}…`);
+ try{const r=await fetch(API+"cardinfo.php?"+entry.q);const j=await r.json();
+  if(j.error||!j.data)throw new Error(j.error||"no data");
+  const list=j.data.map(c=>{S.cardDB[c.name]=slimCard(c);return{name:c.name,rarity:firstRarity(c,entry.kind==="set"?entry.setName:null)};});
+  S.sourceCache[entry.label]=list;save();
+  toast(`${entry.label} ready — ${list.length} cards`);return list;}
+ catch(e){toast(`Couldn't load ${entry.label}`,true);return null;}}
+function sourceRemaining(label){const e=S.sources.entries.find(x=>x.label===label);
+ if(!e)return S.pool.length;return (S.sourceCache[label]||[]).length;}
 
 /* ================= AUCTION ENGINE ================= */
 let AU=null; // live auction runtime (timers live here, config mirrors S.pendingAuction)
 const HIDDEN_TYPES={"Blind Pack":0,"One Card Revealed":1,"Half Reveal":.5};
 $("#btnUseResult").addEventListener("click",()=>{if(!wheelChoice)return;startAuction(wheelChoice);});
-function startAuction(type){
+async function pickSource(){
+ const m=S.sources.mode;
+ if(m==="pool"||!S.sources.entries.length)return{label:"",list:S.pool,set(v){S.pool=v;}};
+ let entry=null;
+ if(m==="fixed")entry=S.sources.entries.find(e=>e.label===S.sources.fixed)||S.sources.entries[0];
+ else entry=srcChoiceEntry||S.sources.entries[Math.floor(Math.random()*S.sources.entries.length)];
+ const list=await ensureSource(entry);
+ if(!list)return null;
+ return{label:entry.label,list,set(v){S.sourceCache[entry.label]=v;}};}
+async function startAuction(type){
  if(S.packsOpened>=S.pack.num&&!confirm("Planned pack count reached — open another anyway?"))return;
- const cards=generatePack();if(!cards||!cards.length)return toast("Card pool is empty — upload a CSV first",true);
+ const src=await pickSource();
+ if(!src)return;
+ const built=buildPack(src.list);
+ if(!built||!built.cards.length)return toast(src.label?`${src.label} is out of cards`:"Card pool is empty — import cards first",true);
+ const cards=built.cards;src.set(built.rest);
  S.packsOpened++;
  const revealAll=!(type in HIDDEN_TYPES);
  let revealed;
@@ -737,16 +998,17 @@ function startAuction(type){
  else if(type==="One Card Revealed")revealed=[Math.floor(Math.random()*cards.length)];
  else if(type==="Half Reveal")revealed=shuffle(cards.map((_,i)=>i)).slice(0,Math.ceil(cards.length/2));
  else revealed=cards.map((_,i)=>i);
- S.currentPack={num:S.packsOpened,type,cards,revealed};
+ S.currentPack={num:S.packsOpened,type,cards,revealed,source:src.label};
  S.pendingAuction={type,phase:"live"};
  save();renderPackInfo();
  renderPackFan();
  runAuctionUI(type);
- $("#wheelResult").textContent="";$("#btnUseResult").disabled=true;wheelChoice=null;}
+ $("#wheelResult").textContent="";$("#btnUseResult").disabled=true;wheelChoice=null;
+ srcChoiceEntry=null;$("#srcResult").textContent="";renderSourceNote();}
 function renderPackFan(reveal=false){const cp=S.currentPack;const panel=$("#packPanel");
  if(!cp){panel.hidden=true;return;}
  panel.hidden=false;
- $("#packTitle").textContent=`Pack #${cp.num} — ${cp.type}`;
+ $("#packTitle").textContent=`Pack #${cp.num} — ${cp.type}`+(cp.source?` · ${cp.source}`:"");
  $("#packFan").innerHTML=cp.cards.map((c,i)=>{const d=cardOf(c.name);const show=reveal||cp.revealed.includes(i);
   const rk=rarKey(c.rarity);
   return`<div class="card3d ${show?"flipped":""} ${rk==="secret"||rk==="ultra"?"secretGlow":""}" style="animation-delay:${i*70}ms" data-i="${i}" title="${show?esc(c.name):"Hidden"}">
@@ -768,7 +1030,9 @@ function renderAuctionIdle(){stopTimers();
   <select id="manualType">${DEFAULT_WHEEL.map(e=>`<option>${e.label}</option>`).join("")}</select>
   <button class="btn" onclick="startAuction(document.getElementById('manualType').value)">Open pack</button></div>`;
  renderPackFan();}
-function restoreAuction(){if(S.pendingAuction&&S.currentPack){renderPackFan();runAuctionUI(S.pendingAuction.type);}else renderAuctionIdle();}
+function restoreAuction(){if(S.pendingAuction&&S.currentPack){renderPackFan();runAuctionUI(S.pendingAuction.type);}
+ else if(S.finished){renderPackFan();$("#auctionStage").innerHTML=finaleHTML()+`<div class="row" style="justify-content:center;margin-top:18px"><button class="btn" onclick="switchView('export')">Export page</button><button class="btn small" onclick="S.finished=false;save();renderAuctionIdle();">Keep drafting anyway</button></div>`;}
+ else renderAuctionIdle();}
 
 function runAuctionUI(type){stopTimers();
  const cur=S.settings.currency;
@@ -914,8 +1178,32 @@ function resolveWin(pi,amount){stopTimers();const p=S.players[pi],cur=S.settings
   <div class="row" style="justify-content:center;margin-top:16px">
    <button class="btn gold big" onclick="renderAuctionIdle();switchView('draft')">Next pack →</button>
    <button class="btn" onclick="switchView('collections')">View collection</button></div>`;
- toast(`${p.name} wins for ${fmt(amount)} ${cur}!`);renderPackInfo();}
-function returnPack(){stopTimers();if(S.currentPack){S.pool.push(...S.currentPack.cards);S.packsOpened--;}
+ toast(`${p.name} wins for ${fmt(amount)} ${cur}!`);renderPackInfo();
+ if(S.packsOpened>=S.pack.num){S.finished=true;save();setTimeout(showFinale,1400);}}
+function finaleHTML(){const cur=S.settings.currency;
+ const rank=S.players.map((p,i)=>({p,i,n:p.cards.length})).sort((a,b)=>b.n-a.n||b.p.money-a.p.money);
+ const medal=["🥇","🥈","🥉"];
+ return`<div class="atype" style="color:var(--gold);font-size:34px">DRAFT COMPLETE</div>
+  <p class="muted">${S.pack.num} packs auctioned · ${fmt(S.history.reduce((a,h)=>a+h.bid,0))} ${esc(cur)} spent</p>
+  <div class="bidders" style="margin-top:16px">${rank.map((r,k)=>`
+   <div class="bidder${k===0?" leader":""}"><h4>${medal[k]||""} ${esc(r.p.name)} <span class="money">${fmt(r.p.money)} ${esc(cur)}</span></h4>
+    <p class="muted" style="font-size:14px">${r.n} cards · ${r.p.bids.length} packs won · ${fmt(r.p.spent)} spent</p>
+    <div class="bbtns">
+     <button class="btn small" onclick="exp(${r.i},'txt')">TXT</button>
+     <button class="btn small" onclick="exp(${r.i},'csv')">CSV</button>
+     <button class="btn small" onclick="exp(${r.i},'json')">JSON</button>
+     <button class="btn small gold" onclick="exp(${r.i},'ydk')">.YDK</button></div></div>`).join("")}</div>`;}
+function showFinale(){stopTimers();confetti();setTimeout(confetti,700);fanfare();
+ $("#auctionStage").innerHTML=finaleHTML()+`
+  <div class="row" style="justify-content:center;margin-top:18px">
+   <button class="btn" onclick="switchView('export')">Export page</button>
+   <button class="btn" onclick="switchView('stats')">Final scoreboard</button>
+   <button class="btn small" onclick="S.finished=false;save();renderAuctionIdle();">Keep drafting anyway</button></div>`;
+ if(NET.role==="host")publishState();}
+function returnPack(){stopTimers();
+ if(S.currentPack){const L=S.currentPack.source;
+  if(L&&S.sourceCache[L])S.sourceCache[L].push(...S.currentPack.cards);else S.pool.push(...S.currentPack.cards);
+  S.packsOpened--;}
  S.currentPack=null;S.pendingAuction=null;save();renderPackInfo();renderAuctionIdle();}
 function cancelPack(){if(confirm("Cancel this pack and return its cards to the pool?"))returnPack();}
 function animateMoney(pi,amount){/* count-down tween on scoreboard next render */
@@ -1030,7 +1318,8 @@ function exp(i,kind){const p=S.players[i];const counts=collCounts(p);const fn=p.
 window.addEventListener("resize",()=>{const cv=$("#confettiCanvas");cv.width=innerWidth;cv.height=innerHeight;});
 (function boot(){load();initRng();
  if(S.players.length===0){S.players=Array.from({length:S.settings.numPlayers},(_,i)=>({name:`Player ${i+1}`,money:S.settings.startMoney,spent:0,bids:[],cards:[]}));}
- renderSetup();renderWheelEditor();drawWheel();renderPool();restoreAuction();})();
+ renderSetup();renderWheelEditor();drawWheel();renderPool();renderSources();renderClassics();renderSourceControls();restoreAuction();
+ $("#srcSet").style.display=$("#srcKind").value==="set"?"":"none";})();
 </script>
 <script>
 "use strict";
@@ -1078,6 +1367,7 @@ function renderRoster(claims){const el=$("#roster");if(!el)return;
  const rows=Object.entries(claims).map(([pi,c])=>`${esc(S.players[+pi]?.name||"Player "+(+pi+1))} — connected`);
  el.innerHTML=rows.length?("<b>Connected:</b> "+rows.join(" · ")):"";}
 function buildLive(){
+ if(S.finished&&!AU)return{mode:"done",type:""};
  if(!AU)return{mode:S.pendingAuction?"wait":"idle",type:S.pendingAuction?.type||""};
  const type=S.pendingAuction?.type||"";
  if(AU.bids)return{mode:"sealed",type,locked:AU.bids.map(b=>b!==null),out:AU.bids.map(b=>b===-1),
@@ -1092,9 +1382,10 @@ function buildMirror(){
  const db={};names.forEach(n=>{if(S.cardDB[n])db[n]=S.cardDB[n];});
  return{settings:S.settings,packsOpened:S.packsOpened,
   players:S.players.map(p=>({name:p.name,money:p.money,spent:p.spent,bids:p.bids,cards:p.cards})),
-  history:S.history,cardList:Object.values(db),live:buildLive(),
+  history:S.history,cardList:Object.values(db),live:buildLive(),packPlanned:S.pack.num,
   pack:S.currentPack?{num:S.currentPack.num,type:S.currentPack.type,revealed:S.currentPack.revealed,
-   cards:S.currentPack.cards.map((c,i)=>S.currentPack.revealed.includes(i)?c:{name:"Hidden card",rarity:""})}:null};}
+   source:S.currentPack.source||"",
+  cards:S.currentPack.cards.map((c,i)=>S.currentPack.revealed.includes(i)?c:{name:"Hidden card",rarity:""})}:null};}
 function publishState(){if(NET.role!=="host"||!NET.db)return;
  try{roomRef("state").set(JSON.parse(JSON.stringify(buildMirror()))).catch(e=>{if(!NET.warned){NET.warned=1;toast("Sync error: "+String(e.message||e).slice(0,80),true);}});}
  catch(e){if(!NET.warned){NET.warned=1;toast("Sync error: "+String(e.message||e).slice(0,80),true);}}}
@@ -1126,7 +1417,7 @@ async function clientJoin(cfg,code){
  switchView("draft");
  $("#wheelPanel").style.display="none";
  $("#draftSub").textContent="Live draft — room "+code;
- $$("#tabs button").forEach(b=>{if(b.dataset.view==="setup"||b.dataset.view==="cards"||b.dataset.view==="export")b.style.display="none";});
+ $$("#tabs button").forEach(b=>{if(b.dataset.view==="setup"||b.dataset.view==="cards")b.style.display="none";});
  toast("Joined room "+code);}
 function onMirror(m){NET.lastM=m;
  (m.cardList||[]).forEach(c=>{if(c&&c.name)S.cardDB[c.name]=c;});
@@ -1136,6 +1427,8 @@ function onMirror(m){NET.lastM=m;
  S.history.forEach(h=>h.cards=h.cards||[]);
  S.currentPack=m.pack||null;
  if(S.currentPack){S.currentPack.cards=S.currentPack.cards||[];S.currentPack.revealed=S.currentPack.revealed||[];}
+ S.finished=!!(m.live&&m.live.mode==="done");
+ if(m.packPlanned)S.pack.num=m.packPlanned;
  S.pendingAuction=(m.live&&m.live.mode!=="idle")?{type:m.live.type}:null;
  if(NET.pi<0){if(NET.lastMode!=="picker"){NET.lastMode="picker";renderClaimPicker();}return;}
  renderClientStage(m.live||{mode:"idle"});
@@ -1170,8 +1463,10 @@ function renderClientStage(live){const cur=S.settings.currency,me=S.players[NET.
  const mm=$("#myMoney");if(mm&&me)mm.textContent=fmt(me.money)+" "+cur;}
 function buildClientStage(live){const cur=S.settings.currency,me=S.players[NET.pi];
  const head=`<div class="atype">${esc(live.type||"Draft Room")}</div>
-  ${S.currentPack?`<div class="muted">Pack #${S.currentPack.num} · ${S.currentPack.cards.length} cards</div>`:""}
+  ${S.currentPack?`<div class="muted">Pack #${S.currentPack.num} · ${S.currentPack.cards.length} cards${S.currentPack.source?" · "+esc(S.currentPack.source):""}</div>`:""}
   <p style="margin:6px 0">You: <b style="color:var(--gold)">${esc(me?.name||"")}</b> · <span class="money" id="myMoney">${fmt(me?.money||0)} ${esc(cur)}</span></p>`;
+ if(live.mode==="done"){$("#auctionStage").innerHTML=finaleHTML()+
+   `<p class="muted" style="margin-top:14px">Grab your collection above, or open the Export tab for every format.</p>`;return;}
  if(live.mode==="idle"){const h=S.history[S.history.length-1];
   $("#auctionStage").innerHTML=head+`<p class="muted" style="padding:24px 0">${h?`Pack #${h.num} sold to <b style="color:var(--gold)">${esc(h.winner)}</b> for ${fmt(h.bid)} ${esc(cur)}.<br>`:""}Waiting for the host to open the next pack…</p>`;return;}
  if(live.mode==="public"){$("#auctionStage").innerHTML=head+
