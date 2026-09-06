@@ -843,16 +843,19 @@ function dutchBuy(i){if(!AU)return;const p=S.players[i];
 function runSealed(type){const cur=S.settings.currency;
  AU={bids:Array(S.players.length).fill(null)};
  const note=type==="Blind Pack"?"Cards stay face-down until the pack is won.":type==="Sudden Death"?"One bid each. Highest takes it.":"Everyone bids in secret, then reveal together.";
+ const mtype=S.settings.maskBids?"password":"number";
  $("#auctionStage").innerHTML=`<div class="atype">${esc(type)}</div>
   <div class="muted">${note}</div>
+  <label class="row" style="justify-content:center;gap:6px;font-size:14px;margin:6px 0"><input type="checkbox" ${S.settings.maskBids?"checked":""} onchange="toggleMask(this)"> Mask bids while typing (for pass-the-device play)</label>
   <div class="bidders" id="bidders">${S.players.map((p,i)=>`
    <div class="bidder" id="bidder${i}"><h4>${esc(p.name)} <span class="money">${fmt(p.money)} ${esc(cur)}</span></h4>
    <div class="bbtns" id="sb${i}">
-    <input type="password" inputmode="numeric" min="0" id="secb${i}" placeholder="Secret bid" style="width:110px">
+    <input type="${mtype}" inputmode="numeric" min="0" id="secb${i}" placeholder="Secret bid" style="width:110px">
     <button class="btn small gold" onclick="sealBid(${i})">Lock in</button></div></div>`).join("")}</div>
   <div class="row" style="justify-content:center;margin-top:16px">
    <button class="btn big gold" id="btnReveal" disabled onclick="revealSealed()">Reveal all bids</button>
    <button class="btn danger small" onclick="cancelPack()">Cancel pack</button></div>`;}
+function toggleMask(cb){S.settings.maskBids=cb.checked;save();$$("input[id^=secb]").forEach(i=>i.type=cb.checked?"password":"number");}
 function sealBid(i){const v=Math.floor(+$("#secb"+i).value);sealApply(i,v,true);}
 function sealApply(i,v,localToast){const p=S.players[i];
  if(!AU||!AU.bids||AU.bids[i]!==null)return;
@@ -863,6 +866,12 @@ function sealApply(i,v,localToast){const p=S.players[i];
  if(AU.bids.every(b=>b!==null)){const r=$("#btnReveal");if(r)r.disabled=false;}}
 function revealSealed(){const cur=S.settings.currency;
  const max=Math.max(...AU.bids);
+ AU.revealedBids=AU.bids.slice();AU.seq=(AU.seq||0)+1;
+ {const ws=S.players.map((p,i)=>i).filter(i=>AU.bids[i]===max);
+  AU.notice=max<=0?"Everyone passed — pack returns to the pool."
+   :ws.length===1?`Bids revealed — ${S.players[ws[0]].name} high at ${fmt(max)} ${cur}`
+   :`Tie at ${fmt(max)} ${cur}: ${ws.map(i=>S.players[i].name).join(" & ")} — host picking the tiebreaker…`;}
+ publishStateLiveOnly();
  const rows=S.players.map((p,i)=>`<tr${AU.bids[i]===max&&max>0?' style="color:var(--gold);font-weight:700"':''}><td>${esc(p.name)}</td><td>${fmt(AU.bids[i])} ${esc(cur)}</td></tr>`).join("");
  if(max<=0){openModal(`<h2>All passed</h2><table><tbody>${rows}</tbody></table><p class="muted" style="margin-top:10px">Pack returns to the pool.</p><button class="btn" style="margin-top:12px" onclick="closeModal();returnPack()">OK</button>`);return;}
  const winners=S.players.map((p,i)=>i).filter(i=>AU.bids[i]===max);
@@ -873,9 +882,11 @@ function revealSealed(){const cur=S.settings.currency;
   <div class="row"><button class="btn gold" onclick="closeModal();tieRandom([${winners}] ,${max})">Random winner</button>
   <button class="btn" onclick="closeModal();tieRunoff([${winners}])">Runoff bid</button></div>`);}}
 function tieRandom(ws,amt){const w=ws[Math.floor(Math.random()*ws.length)];toast(`Fate chooses ${S.players[w].name}!`);resolveWin(w,amt);}
-function tieRunoff(ws){AU={bids:S.players.map((_,i)=>ws.includes(i)?null:-1)};
+function tieRunoff(ws){const seq=(AU&&AU.seq)||0;
+ AU={bids:S.players.map((_,i)=>ws.includes(i)?null:-1),seq:seq+1,notice:"Runoff! Tied players lock in one more bid.",revealedBids:null};
+ publishStateLiveOnly();
  $$(".bidder").forEach((b,i)=>{if(!ws.includes(i)){b.classList.add("done");$("#sb"+i)&&($("#sb"+i).innerHTML=`<span class="pill">Out of runoff</span>`);}
-  else{b.classList.remove("done");$("#sb"+i).innerHTML=`<input type="password" inputmode="numeric" id="secb${i}" placeholder="Runoff bid" style="width:110px"><button class="btn small gold" onclick="runoffBid(${i})">Lock in</button>`;}});
+  else{b.classList.remove("done");$("#sb"+i).innerHTML=`<input type="${S.settings.maskBids?"password":"number"}" inputmode="numeric" id="secb${i}" placeholder="Runoff bid" style="width:110px"><button class="btn small gold" onclick="runoffBid(${i})">Lock in</button>`;}});
  $("#btnReveal").disabled=true;$("#btnReveal").onclick=revealRunoff;toast("Runoff! Tied players bid again.");}
 function runoffBid(i){const v=Math.floor(+$("#secb"+i).value);const p=S.players[i];
  if(isNaN(v)||v<0)return toast("Enter a bid",true);if(v>p.money)return toast("Not enough "+S.settings.currency,true);
@@ -1069,7 +1080,8 @@ function renderRoster(claims){const el=$("#roster");if(!el)return;
 function buildLive(){
  if(!AU)return{mode:S.pendingAuction?"wait":"idle",type:S.pendingAuction?.type||""};
  const type=S.pendingAuction?.type||"";
- if(AU.bids)return{mode:"sealed",type,locked:AU.bids.map(b=>b!==null),out:AU.bids.map(b=>b===-1)};
+ if(AU.bids)return{mode:"sealed",type,locked:AU.bids.map(b=>b!==null),out:AU.bids.map(b=>b===-1),
+  notice:AU.notice||"",seq:AU.seq||0,bids:AU.revealedBids||null};
  if(AU.price!==undefined)return{mode:"dutch",type,price:AU.price};
  return{mode:"public",type,bid:AU.bid,leader:AU.leader,time:Math.max(0,AU.time),max:AU.max};}
 function buildMirror(){
@@ -1145,15 +1157,16 @@ function claimSeat(i){NET.pi=i;roomRef("claims/"+i).set({d:NET.deviceId,t:Date.n
 function sendAction(o){o.pi=NET.pi;roomRef("actions").push(o);}
 function clientCustomBid(){const v=+$("#ccb").value;if(!v)return;$("#ccb").value="";sendAction({t:"abs",v});}
 function renderClientStage(live){const cur=S.settings.currency,me=S.players[NET.pi];
- const key=live.mode+"|"+live.type+"|"+(S.currentPack?.num||0);
+ const key=live.mode+"|"+live.type+"|"+(S.currentPack?.num||0)+"|"+(live.seq||0)+"|"+(Array.isArray(live.bids)?1:0);
  if(key!==NET.lastMode){NET.lastMode=key;buildClientStage(live);}
  // fast-path updates
  if(live.mode==="public"){const b=$("#curBid");if(b)b.textContent=fmt(live.bid);
   const f=$("#tfill");if(f){f.style.width=Math.max(0,live.time/live.max*100)+"%";$("#tbar").classList.toggle("hot",live.time<=5);}
   const l=$("#curLeader");if(l)l.innerHTML=live.leader===null||live.leader===undefined?"No bids yet":`Highest bidder: <b style="color:var(--gold)">${esc(S.players[live.leader]?.name||"")}</b>${live.leader===NET.pi?" (you!)":""}`;}
  if(live.mode==="dutch"){const b=$("#curBid");if(b)b.textContent=fmt(live.price);}
- if(live.mode==="sealed"){const st=$("#sealStat");if(st)st.textContent=live.locked.filter(Boolean).length+" / "+live.locked.length+" bids locked";
-  if(live.locked[NET.pi]&&$("#sealCtl"))$("#sealCtl").innerHTML=`<span class="pill" style="color:var(--ok)">Bid locked ✓ — waiting for reveal</span>`;}
+ if(live.mode==="sealed"){const st=$("#sealStat");if(st&&live.locked)st.textContent=live.locked.filter(Boolean).length+" / "+live.locked.length+" bids locked";
+  const nt=$("#sealNote");if(nt)nt.textContent=live.notice||"";
+  if(live.locked&&live.locked[NET.pi]&&!live.out?.[NET.pi]&&$("#sealCtl")&&!Array.isArray(live.bids))$("#sealCtl").innerHTML=`<span class="pill" style="color:var(--ok)">Bid locked ✓ — waiting for reveal</span>`;}
  const mm=$("#myMoney");if(mm&&me)mm.textContent=fmt(me.money)+" "+cur;}
 function buildClientStage(live){const cur=S.settings.currency,me=S.players[NET.pi];
  const head=`<div class="atype">${esc(live.type||"Draft Room")}</div>
@@ -1174,13 +1187,18 @@ function buildClientStage(live){const cur=S.settings.currency,me=S.players[NET.p
    <div class="bidbox"><span id="curBid">${fmt(live.price)}</span> <span style="font-size:22px;color:var(--gold)">${esc(cur)}</span></div>
    <button class="btn big gold" onclick="sendAction({t:'dutch'})">BUY NOW</button>`;return;}
  if(live.mode==="sealed"){const out=live.out&&live.out[NET.pi];
-  $("#auctionStage").innerHTML=head+
-  `<p class="muted" id="sealStat"></p>
+  const revealed=Array.isArray(live.bids);
+  let inner;
+  if(revealed){const valid=live.bids.filter(b=>b>=0);const mx=valid.length?Math.max(...valid):0;
+   inner=`<table style="max-width:340px;margin:10px auto"><tbody>${S.players.map((p,i)=>{const b=live.bids[i];
+    return`<tr${b===mx&&mx>0?' style="color:var(--gold);font-weight:700"':''}><td>${esc(p.name)}${i===NET.pi?" (you)":""}</td><td>${b==null||b<0?"—":fmt(b)+" "+esc(cur)}</td></tr>`;}).join("")}</tbody></table>`;}
+  else inner=`<p class="muted" id="sealStat"></p>
    <div id="sealCtl" style="margin-top:10px">${out?`<span class="pill">You're out of this runoff</span>`
     :live.locked[NET.pi]?`<span class="pill" style="color:var(--ok)">Bid locked ✓</span>`
-    :`<input type="password" inputmode="numeric" id="myseal" placeholder="Secret bid" style="width:130px">
+    :`<input type="number" inputmode="numeric" id="myseal" placeholder="Secret bid" style="width:130px">
       <button class="btn big gold" onclick="sendAction({t:'sealed',v:+document.getElementById('myseal').value})">Lock in</button>`}</div>
-   <p class="muted" style="margin-top:10px">Bids reveal on the host's screen.</p>`;return;}
+   <p class="muted" style="margin-top:10px">Bids reveal together once everyone locks in.</p>`;
+  $("#auctionStage").innerHTML=head+`<p style="margin:6px 0;color:var(--gold)" id="sealNote">${esc(live.notice||"")}</p>`+inner;return;}
  $("#auctionStage").innerHTML=head+`<p class="muted" style="padding:24px 0">Auction in progress on the host's screen…</p>`;}
 
 /* ---------- hooks & boot ---------- */
