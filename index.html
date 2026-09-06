@@ -577,8 +577,18 @@ function renderSetup(){const st=S.settings;
  $("#setDutchStart").value=st.dutchStart;$("#setDutchStep").value=st.dutchStep;$("#setDutchInt").value=st.dutchInt;
  renderNameInputs(); renderRarityMode(); renderPackInfo(); renderSources(); renderSourceControls();
  $("#setCPP").value=S.pack.cpp;$("#setNumPacks").value=S.pack.num;$("#setSeed").value=S.pack.seed;}
-function renderNameInputs(){const n=Math.min(12,Math.max(2,+$("#setPlayers").value||4));let html="<h3 style='margin-top:10px'>Duelists</h3><div class='grid3'>";
- for(let i=0;i<n;i++){const nm=S.players[i]?.name||`Player ${i+1}`;html+=`<div class="field"><label>Player ${i+1}</label><input type="text" class="pname" value="${esc(nm)}"></div>`;}
+function renderNameInputs(){const n=Math.min(12,Math.max(2,+$("#setPlayers").value||4));
+ let html="<h3 style='margin-top:10px'>Duelists</h3><p class='muted' style='font-size:14px;margin-bottom:8px'>Tick CPU to let the app play that seat — bots bid on their own in every auction type.</p><div class='grid3'>";
+ for(let i=0;i<n;i++){const p=S.players[i]||{};const nm=p.name||`Player ${i+1}`;
+  html+=`<div class="field"><label>Player ${i+1}</label>
+   <input type="text" class="pname" value="${esc(nm)}">
+   <div class="row" style="gap:8px;margin-top:4px">
+    <label class="row" style="gap:5px;font-size:14px"><input type="checkbox" class="pcpu" ${p.cpu?"checked":""}> CPU</label>
+    <select class="pskill" style="font-size:14px;padding:4px 6px">
+     <option value="chill" ${p.skill==="chill"?"selected":""}>Cautious</option>
+     <option value="normal" ${!p.skill||p.skill==="normal"?"selected":""}>Balanced</option>
+     <option value="shark" ${p.skill==="shark"?"selected":""}>Shark</option></select>
+   </div></div>`;}
  $("#playerNames").innerHTML=html+"</div>";}
 $("#setPlayers").addEventListener("input",renderNameInputs);
 $("#btnApplySetup").addEventListener("click",()=>{
@@ -587,7 +597,10 @@ $("#btnApplySetup").addEventListener("click",()=>{
  st.timer=+$("#setTimer").value||20;st.speedTimer=+$("#setSpeedTimer").value||6;
  st.dutchStart=+$("#setDutchStart").value||200;st.dutchStep=+$("#setDutchStep").value||10;st.dutchInt=+$("#setDutchInt").value||2;
  const names=$$(".pname").map(i=>i.value.trim()||"Player");
- const old=S.players;S.players=names.slice(0,st.numPlayers).map((nm,i)=>old[i]?Object.assign(old[i],{name:nm}):{name:nm,money:st.startMoney,spent:0,bids:[],cards:[]});
+ const cpus=$$(".pcpu").map(i=>i.checked),skills=$$(".pskill").map(i=>i.value);
+ const old=S.players;S.players=names.slice(0,st.numPlayers).map((nm,i)=>
+  old[i]?Object.assign(old[i],{name:nm,cpu:!!cpus[i],skill:skills[i]||"normal"})
+   :{name:nm,money:st.startMoney,spent:0,bids:[],cards:[],cpu:!!cpus[i],skill:skills[i]||"normal"});
  S.players.forEach(p=>{if(old.length===0||p.money===undefined)p.money=st.startMoney;});
  S.pack.cpp=Math.max(1,+$("#setCPP").value||8);S.pack.num=Math.max(1,+$("#setNumPacks").value||24);S.pack.seed=$("#setSeed").value.trim();
  initRng(); save(); renderPackInfo(); toast("Setup applied");});
@@ -1242,7 +1255,8 @@ function renderPackFan(reveal=false){const cp=S.currentPack;const panel=$("#pack
   if(!S.currentPack)return;
   if(!S.currentPack.revealed.includes(i)&&!el.classList.contains("flipped"))return; // hidden stays hidden
   showCardModal(S.currentPack.cards[i].name);beep(880,.04,.04,"sine");};}
-function stopTimers(){if(AU){clearInterval(AU.int);clearInterval(AU.dutchInt);AU=null;}}
+function stopTimers(){if(AU){clearInterval(AU.int);clearInterval(AU.dutchInt);
+ if(AU.cpuT)AU.cpuT.forEach(t=>clearTimeout(t));AU=null;}}
 function renderAuctionIdle(){stopTimers();
  $("#auctionStage").innerHTML=`<p class="muted" style="padding:40px 0">No pack open. Spin the wheel, then open the next pack.</p>
  <div class="row" style="justify-content:center"><span class="muted">or pick manually:</span>
@@ -1263,6 +1277,67 @@ function runAuctionUI(type){stopTimers();
 </script>
 <script>
 "use strict";
+/* ================= CPU DUELISTS ================= */
+const RVAL={common:1,rare:3,super:8,ultra:20,secret:45,ultimate:40,ghost:60};
+const SKILL={chill:{mult:.72,delay:[1100,2600],noise:.18},normal:{mult:1,delay:[700,1900],noise:.14},shark:{mult:1.32,delay:[380,1200],noise:.10}};
+function isCPU(i){return !!(S.players[i]&&S.players[i].cpu);}
+function anyCPU(){return S.players.some(p=>p.cpu);}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function cpuMaxBid(pi){const p=S.players[pi],cp=S.currentPack;if(!p||!cp)return 0;
+ const sk=SKILL[p.skill]||SKILL.normal;
+ const cpp=cp.cards.length||1;
+ // average value of an unknown card, from what this pack has shown so far
+ const seen=cp.cards.filter((_,i)=>cp.revealed.includes(i));
+ const seenAvg=seen.length?seen.reduce((a,c)=>a+(RVAL[rarKey(c.rarity)]||1),0)/seen.length:4;
+ let score=0;
+ cp.cards.forEach((c,i)=>{score+=cp.revealed.includes(i)?(RVAL[rarKey(c.rarity)]||1):Math.min(seenAvg,6);});
+ const expected=cpp*4; // a bland pack
+ const ratio=Math.max(.25,Math.min(3,score/expected));
+ const packsLeft=Math.max(1,S.pack.num-S.packsOpened+1);
+ const share=Math.max(1,Math.ceil(packsLeft/Math.max(1,S.players.length)));
+ const budget=p.money/share;
+ let max=budget*ratio*sk.mult*rnd(1-sk.noise,1+sk.noise);
+ // keep a reserve until the final pack, so the endgame isn't always an all-in
+ const reserve=packsLeft<=1?1:packsLeft<=3?.8:.6;
+ max=Math.min(max,p.money*reserve);
+ if(p.money<=3)max=Math.min(max,p.money);
+ return Math.max(0,Math.min(p.money,Math.round(max)));}
+function cpuClear(){if(AU&&AU.cpuT){AU.cpuT.forEach(t=>clearTimeout(t));AU.cpuT=[];}}
+function cpuArm(fn,lo,hi){if(!AU)return;AU.cpuT=AU.cpuT||[];AU.cpuT.push(setTimeout(fn,rnd(lo,hi)));}
+/* public / speed: bots react to the standing bid */
+function cpuPublicStart(){if(!anyCPU()||!AU)return;S.players.forEach((p,i)=>{if(p.cpu)cpuPublicThink(i);});}
+function cpuPublicThink(i){const p=S.players[i];if(!AU||!p||!p.cpu)return;
+ const sk=SKILL[p.skill]||SKILL.normal;
+ cpuArm(()=>{
+  if(!AU||AU.max===undefined||S.pendingAuction===null)return;
+  if(AU.leader===i)return cpuPublicThink(i);            // already winning — wait
+  const max=AU.cpuMax&&AU.cpuMax[i]!==undefined?AU.cpuMax[i]:(AU.cpuMax=AU.cpuMax||{},AU.cpuMax[i]=cpuMaxBid(i));
+  const gap=max-AU.bid;
+  if(gap<1)return;                                       // priced out, bow out
+  const step=gap>60?25:gap>25?10:gap>8?5:1;
+  const bid=Math.min(max,AU.bid+step);
+  if(bid>p.money||bid<=AU.bid)return;
+  placePublic(i,bid);
+  cpuPublicThink(i);
+ },sk.delay[0],sk.delay[1]);}
+/* sealed: one hidden number each */
+function cpuSealed(){if(!anyCPU()||!AU)return;
+ S.players.forEach((p,i)=>{if(!p.cpu)return;
+  const sk=SKILL[p.skill]||SKILL.normal;
+  cpuArm(()=>{if(!AU||!AU.bids||AU.bids[i]!==null)return;
+   const max=cpuMaxBid(i);
+   sealApply(i,Math.max(0,Math.round(max*rnd(.72,1))),false);},sk.delay[0]+400,sk.delay[1]+1200);});}
+function cpuRunoff(ws){if(!AU)return;
+ ws.forEach(i=>{if(!isCPU(i))return;const sk=SKILL[S.players[i].skill]||SKILL.normal;
+  cpuArm(()=>{if(!AU||!AU.bids||AU.bids[i]!==null)return;
+   sealApply(i,Math.max(0,Math.round(cpuMaxBid(i)*rnd(.85,1.15))),false);},sk.delay[0]+300,sk.delay[1]+900);});}
+/* dutch: buy the moment the falling price hits their number */
+function cpuDutchCheck(){if(!AU||AU.price===undefined)return;
+ const buyers=S.players.map((p,i)=>i).filter(i=>isCPU(i)&&S.players[i].money>=AU.price);
+ for(const i of buyers){const max=AU.cpuMax&&AU.cpuMax[i]!==undefined?AU.cpuMax[i]:((AU.cpuMax=AU.cpuMax||{}),AU.cpuMax[i]=cpuMaxBid(i));
+  if(AU.price<=max){const sk=SKILL[S.players[i].skill]||SKILL.normal;
+   cpuArm(()=>{if(AU&&AU.price!==undefined&&AU.price<=max)dutchBuy(i);},120,sk.delay[0]);return;}}}
+
 /* ---------- PUBLIC / SPEED (and revealed variants) ---------- */
 function runPublic(speed){const st=S.settings,cur=st.currency;
  AU={bid:0,leader:null,time:speed?st.speedTimer:st.timer,max:speed?st.speedTimer:st.timer,int:null};
@@ -1279,13 +1354,13 @@ function runPublic(speed){const st=S.settings,cur=st.currency;
  const box=$("#bidders");
  box.innerHTML=S.players.map((p,i)=>`
   <div class="bidder" id="bidder${i}">
-   <h4>${esc(p.name)} <span class="money">${fmt(p.money)} ${esc(cur)}</span></h4>
+   <h4>${esc(p.name)}${p.cpu?' <span class="pill" style="font-size:11px;color:var(--cyan)">CPU</span>':""} <span class="money">${fmt(p.money)} ${esc(cur)}</span></h4>
    <div class="bbtns">
     ${[1,5,10,25].map(v=>`<button class="btn small" onclick="pubBid(${i},${v})">+${v}</button>`).join("")}
     <input type="number" min="1" id="cb${i}" placeholder="Bid" style="width:80px">
     <button class="btn small gold" onclick="pubBidCustom(${i})">Bid</button>
    </div></div>`).join("");
- AU.int=setInterval(tickPublic,200);tickPublic(true);}
+ AU.int=setInterval(tickPublic,200);tickPublic(true);cpuPublicStart();}
 function tickPublic(init){if(!AU)return;if(!init)AU.time-=0.2;
  const f=$("#tfill");if(f){f.style.width=Math.max(0,AU.time/AU.max*100)+"%";$("#tbar").classList.toggle("hot",AU.time<=5);}
  if(AU.time<=3&&AU.time>0&&Math.abs(AU.time%1)<0.21)beep(1000,.05,.05);
@@ -1313,10 +1388,11 @@ function runDutch(){const st=S.settings,cur=st.currency;
   <div class="muted">Price drops every ${st.dutchInt}s — first Buy wins</div>
   <div class="bidbox"><span id="curBid">${fmt(AU.price)}</span> <span style="font-size:22px;color:var(--gold)">${esc(cur)}</span></div>
   <div class="bidders" id="bidders">${S.players.map((p,i)=>`
-   <div class="bidder" id="bidder${i}"><h4>${esc(p.name)} <span class="money">${fmt(p.money)} ${esc(cur)}</span></h4>
+   <div class="bidder" id="bidder${i}"><h4>${esc(p.name)}${p.cpu?' <span class="pill" style="font-size:11px;color:var(--cyan)">CPU</span>':""} <span class="money">${fmt(p.money)} ${esc(cur)}</span></h4>
    <div class="bbtns"><button class="btn gold" onclick="dutchBuy(${i})">BUY NOW</button></div></div>`).join("")}</div>
   <div class="row" style="justify-content:center;margin-top:14px"><button class="btn danger small" onclick="cancelPack()">Cancel pack</button></div>`;
- AU.dutchInt=setInterval(()=>{AU.price=Math.max(0,AU.price-st.dutchStep);$("#curBid").textContent=fmt(AU.price);beep(430,.03,.03);animateBid();
+ cpuDutchCheck();
+ AU.dutchInt=setInterval(()=>{AU.price=Math.max(0,AU.price-st.dutchStep);$("#curBid").textContent=fmt(AU.price);beep(430,.03,.03);animateBid();cpuDutchCheck();
   if(AU.price<=0){clearInterval(AU.dutchInt);toast("Price hit zero — pack returned");returnPack();}},st.dutchInt*1000);}
 function dutchBuy(i){if(!AU)return;const p=S.players[i];
  if(AU.price>p.money)return toast(`${p.name} can't afford ${fmt(AU.price)}`,true);
@@ -1331,7 +1407,7 @@ function runSealed(type){const cur=S.settings.currency;
   <div class="muted">${note}</div>
   <label class="row" style="justify-content:center;gap:6px;font-size:14px;margin:6px 0"><input type="checkbox" ${S.settings.maskBids?"checked":""} onchange="toggleMask(this)"> Mask bids while typing (for pass-the-device play)</label>
   <div class="bidders" id="bidders">${S.players.map((p,i)=>`
-   <div class="bidder" id="bidder${i}"><h4>${esc(p.name)} <span class="money">${fmt(p.money)} ${esc(cur)}</span></h4>
+   <div class="bidder" id="bidder${i}"><h4>${esc(p.name)}${p.cpu?' <span class="pill" style="font-size:11px;color:var(--cyan)">CPU</span>':""} <span class="money">${fmt(p.money)} ${esc(cur)}</span></h4>
    <div class="bbtns" id="sb${i}">
     <input type="${mtype}" inputmode="numeric" min="0" id="secb${i}" placeholder="Secret bid" style="width:110px">
     <button class="btn small gold" onclick="sealBid(${i})">Lock in</button></div></div>`).join("")}</div>
@@ -1370,7 +1446,7 @@ function tieRunoff(ws){const seq=(AU&&AU.seq)||0;
  publishStateLiveOnly();
  $$(".bidder").forEach((b,i)=>{if(!ws.includes(i)){b.classList.add("done");$("#sb"+i)&&($("#sb"+i).innerHTML=`<span class="pill">Out of runoff</span>`);}
   else{b.classList.remove("done");$("#sb"+i).innerHTML=`<input type="${S.settings.maskBids?"password":"number"}" inputmode="numeric" id="secb${i}" placeholder="Runoff bid" style="width:110px"><button class="btn small gold" onclick="runoffBid(${i})">Lock in</button>`;}});
- $("#btnReveal").disabled=true;$("#btnReveal").onclick=revealRunoff;toast("Runoff! Tied players bid again.");}
+ $("#btnReveal").disabled=true;$("#btnReveal").onclick=revealRunoff;toast("Runoff! Tied players bid again.");cpuRunoff(ws);}
 function runoffBid(i){const v=Math.floor(+$("#secb"+i).value);const p=S.players[i];
  if(isNaN(v)||v<0)return toast("Enter a bid",true);if(v>p.money)return toast("Not enough "+S.settings.currency,true);
  AU.bids[i]=v;$("#sb"+i).innerHTML=`<span class="pill" style="color:var(--ok)">Locked ✓</span>`;
