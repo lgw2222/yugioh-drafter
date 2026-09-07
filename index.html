@@ -256,6 +256,16 @@ tr:hover td{background:rgba(255,255,255,.02)}
     </div>
   </div>
   <div class="panel" style="margin-top:18px">
+    <h3>Draft Library</h3>
+    <p class="muted" style="font-size:14px;margin-bottom:10px">Every finished draft is archived here automatically. Keep as many as you like — collections, history and standings are all preserved.</p>
+    <div class="row" style="margin-bottom:12px">
+      <input type="text" id="archName" placeholder="Name this draft…" style="width:200px">
+      <button class="btn" id="btnArchiveNow">Save current draft</button>
+      <button class="btn gold" id="btnArchiveNew">Archive &amp; start a new draft</button>
+    </div>
+    <div id="draftLibrary"></div>
+  </div>
+  <div class="panel" style="margin-top:18px">
     <h3>Save / Load</h3>
     <div class="row">
       <button class="btn" id="btnSaveFile">Download save file</button>
@@ -575,7 +585,7 @@ function renderSetup(){const st=S.settings;
  $("#setPlayers").value=st.numPlayers;$("#setMoney").value=st.startMoney;$("#setCurrency").value=st.currency;
  $("#setTimer").value=st.timer;$("#setSpeedTimer").value=st.speedTimer;
  $("#setDutchStart").value=st.dutchStart;$("#setDutchStep").value=st.dutchStep;$("#setDutchInt").value=st.dutchInt;
- renderNameInputs(); renderRarityMode(); renderPackInfo(); renderSources(); renderSourceControls();
+ renderNameInputs(); renderRarityMode(); renderPackInfo(); renderSources(); renderSourceControls(); renderLibrary();
  $("#setCPP").value=S.pack.cpp;$("#setNumPacks").value=S.pack.num;$("#setSeed").value=S.pack.seed;}
 function renderNameInputs(){const n=Math.min(12,Math.max(2,+$("#setPlayers").value||4));
  let html="<h3 style='margin-top:10px'>Duelists</h3><p class='muted' style='font-size:14px;margin-bottom:8px'>Tick CPU to let the app play that seat — bots bid on their own in every auction type.</p><div class='grid3'>";
@@ -659,6 +669,89 @@ $("#btnAddRarity").addEventListener("click",()=>{S.pack.slots.push({rarity:"Rare
 $("#setCPP").addEventListener("input",()=>{S.pack.cpp=Math.max(1,+$("#setCPP").value||8);updateSlotTotal();});
 function renderPackInfo(){$("#poolInfo").textContent=`Pool: ${S.pool.length} cards left`;
  $("#packInfo").textContent=`Packs: ${S.packsOpened} opened / ${S.pack.num} planned`;}
+
+/* ================= DRAFT LIBRARY ================= */
+function libIndex(){try{return JSON.parse(store.get("yadm_index")||"[]");}catch(e){return[];}}
+function libSetIndex(x){store.set("yadm_index",JSON.stringify(x));}
+function slimForArchive(){
+ const names=new Set();
+ S.players.forEach(p=>p.cards.forEach(n=>names.add(n)));
+ S.history.forEach(h=>h.cards.forEach(c=>names.add(c.name)));
+ const db={};names.forEach(n=>{if(S.cardDB[n]){const c=Object.assign({},S.cardDB[n]);c.desc="";db[n]=c;}});
+ return{settings:S.settings,pack:{cpp:S.pack.cpp,num:S.pack.num},modeName:S.modeName||"Custom Rules",
+  players:S.players.map(p=>({name:p.name,money:p.money,spent:p.spent,bids:p.bids,cards:p.cards,cpu:!!p.cpu})),
+  history:S.history,cardDB:db,packsOpened:S.packsOpened,finished:!!S.finished};}
+function archiveCurrent(name,quiet){
+ if(!S.history.length)return quiet?null:toast("Nothing to save yet — win a pack first",true);
+ const id="d"+Date.now().toString(36);
+ const snap=slimForArchive();
+ const top=S.players.slice().sort((a,b)=>b.cards.length-a.cards.length)[0];
+ const entry={id,name:name||`${snap.modeName} — ${new Date().toLocaleDateString()}`,date:Date.now(),
+  mode:snap.modeName,players:S.players.length,packs:S.history.length,
+  winner:top?top.name:"",cards:S.players.reduce((a,p)=>a+p.cards.length,0)};
+ if(!store.set("yadm_draft_"+id,JSON.stringify(snap))){
+  if(!quiet)toast("Not enough browser storage — download a save file instead",true);return null;}
+ const idx=libIndex();idx.unshift(entry);libSetIndex(idx);
+ S.archivedId=id;save();renderLibrary();
+ if(!quiet)toast(`Saved "${entry.name}" to your library`);
+ return id;}
+function readDraft(id){try{return JSON.parse(store.get("yadm_draft_"+id)||"null");}catch(e){return null;}}
+function renderLibrary(){const box=$("#draftLibrary");if(!box)return;
+ const idx=libIndex();
+ if(!idx.length){box.innerHTML=`<p class="muted">No saved drafts yet.</p>`;return;}
+ box.innerHTML=`<table><thead><tr><th>Draft</th><th>Mode</th><th>Packs</th><th>Top collection</th><th></th></tr></thead><tbody>
+  ${idx.map(e=>`<tr><td><b>${esc(e.name)}</b><br><span class="muted" style="font-size:13px">${new Date(e.date).toLocaleString()}</span></td>
+   <td class="muted">${esc(e.mode||"")}</td><td>${e.packs}</td><td style="color:var(--gold)">${esc(e.winner||"")}</td>
+   <td style="text-align:right;white-space:nowrap">
+    <button class="btn small" onclick="viewArchive('${e.id}')">View</button>
+    <button class="btn small" onclick="loadArchive('${e.id}')">Load</button>
+    <button class="btn small danger" onclick="deleteArchive('${e.id}')">✕</button></td></tr>`).join("")}
+  </tbody></table>`;}
+let ARCH=null;
+function viewArchive(id){const d=readDraft(id);if(!d)return toast("That draft couldn't be read",true);
+ Object.assign(S.cardDB,d.cardDB||{});ARCH=d;
+ const cur=d.settings.currency||"Gold";
+ const rank=d.players.map((p,i)=>({p,i})).sort((a,b)=>b.p.cards.length-a.p.cards.length);
+ const medal=["🥇","🥈","🥉"];
+ openModal(`<h2 style="color:var(--ink)">${esc(libIndex().find(x=>x.id===id)?.name||"Draft")}</h2>
+  <p class="muted">${esc(d.modeName||"")} · ${d.history.length} packs · ${new Date(libIndex().find(x=>x.id===id)?.date||Date.now()).toLocaleString()}</p>
+  <div class="bidders" style="margin-top:14px">${rank.map((r,k)=>`
+   <div class="bidder${k===0?" leader":""}"><h4>${medal[k]||""} ${esc(r.p.name)}${r.p.cpu?' <span class="pill" style="font-size:11px;color:var(--cyan)">CPU</span>':""}
+    <span class="money">${fmt(r.p.money)} ${esc(cur)}</span></h4>
+    <p class="muted" style="font-size:14px">${r.p.cards.length} cards · ${r.p.bids.length} packs · ${fmt(r.p.spent)} spent</p>
+    <div class="bbtns">
+     <button class="btn small" onclick="exp(${r.i},'txt',ARCH)">TXT</button>
+     <button class="btn small" onclick="exp(${r.i},'csv',ARCH)">CSV</button>
+     <button class="btn small" onclick="exp(${r.i},'json',ARCH)">JSON</button>
+     <button class="btn small gold" onclick="exp(${r.i},'ydk',ARCH)">.YDK</button>
+     <button class="btn small" onclick="viewArchiveBinder('${id}',${r.i})">Binder</button></div></div>`).join("")}</div>`);}
+function viewArchiveBinder(id,pi){const d=readDraft(id);if(!d)return;
+ Object.assign(S.cardDB,d.cardDB||{});
+ const p=d.players[pi];const counts={};p.cards.forEach(n=>counts[n]=(counts[n]||0)+1);
+ const items=Object.keys(counts).sort().map(n=>({n,c:cardOf(n),qty:counts[n]}));
+ openModal(`<button class="btn small" onclick="viewArchive('${id}')">← Back</button>
+  <h2 style="color:var(--ink);margin-top:10px">${esc(p.name)} <span class="pill">${p.cards.length} cards</span></h2>
+  <div class="binder" style="margin-top:14px">${binderSlots(items)}</div>`);}
+function loadArchive(id){const d=readDraft(id);if(!d)return toast("That draft couldn't be read",true);
+ if(!confirm("Load this draft? Your current draft will be replaced — save it first if you want to keep it."))return;
+ Object.assign(S.cardDB,d.cardDB||{});
+ S.settings=d.settings;S.players=d.players.map(p=>Object.assign({bids:[],cards:[]},p));
+ S.history=d.history||[];S.packsOpened=d.packsOpened||S.history.length;
+ S.pack.num=d.pack?.num||S.pack.num;S.pack.cpp=d.pack?.cpp||S.pack.cpp;
+ S.modeName=d.modeName||"";S.finished=!!d.finished;S.currentPack=null;S.pendingAuction=null;S.archivedId=id;
+ save();renderSetup();renderCollections();renderHistory();renderStats();restoreAuction();
+ closeModal();toast("Draft loaded — collections and history restored");}
+function deleteArchive(id){if(!confirm("Delete this saved draft permanently?"))return;
+ store.del("yadm_draft_"+id);libSetIndex(libIndex().filter(e=>e.id!==id));renderLibrary();toast("Draft deleted");}
+$("#btnArchiveNow").addEventListener("click",()=>{archiveCurrent($("#archName").value.trim());$("#archName").value="";});
+$("#btnArchiveNew").addEventListener("click",()=>{
+ if(S.history.length){const id=archiveCurrent($("#archName").value.trim());if(!id&&S.history.length)return;}
+ $("#archName").value="";
+ S.players.forEach(p=>{p.money=S.settings.startMoney;p.spent=0;p.bids=[];p.cards=[];});
+ S.history=[];S.packsOpened=0;S.currentPack=null;S.pendingAuction=null;S.finished=false;S.started=false;S.archivedId=null;
+ Object.keys(S.sourceCache).forEach(k=>delete S.sourceCache[k]);
+ save();renderSetup();renderAuctionIdle();renderLibrary();
+ toast("Fresh draft ready — previous one is in your library");});
 
 /* ================= GAME MODES ================= */
 function W(labels,weight){ // wheel built from a weight map
@@ -1474,7 +1567,9 @@ function resolveWin(pi,amount){stopTimers();const p=S.players[pi],cur=S.settings
    <button class="btn gold big" onclick="renderAuctionIdle();switchView('draft')">Next pack →</button>
    <button class="btn" onclick="switchView('collections')">View collection</button></div>`;
  toast(`${p.name} wins for ${fmt(amount)} ${cur}!`);renderPackInfo();
- if(S.packsOpened>=S.pack.num){S.finished=true;save();setTimeout(showFinale,1400);}}
+ if(S.packsOpened>=S.pack.num){S.finished=true;save();
+  if(!S.archivedId)archiveCurrent(`${S.modeName||"Draft"} — ${new Date().toLocaleDateString()}`,true);
+  setTimeout(showFinale,1400);}}
 function finaleHTML(){const cur=S.settings.currency;
  const rank=S.players.map((p,i)=>({p,i,n:p.cards.length})).sort((a,b)=>b.n-a.n||b.p.money-a.p.money);
  const medal=["🥇","🥈","🥉"];
@@ -1493,7 +1588,8 @@ function showFinale(){stopTimers();confetti();setTimeout(confetti,700);fanfare()
   <div class="row" style="justify-content:center;margin-top:18px">
    <button class="btn" onclick="switchView('export')">Export page</button>
    <button class="btn" onclick="switchView('stats')">Final scoreboard</button>
-   <button class="btn small" onclick="S.finished=false;save();renderAuctionIdle();">Keep drafting anyway</button></div>`;
+   <button class="btn small" onclick="S.finished=false;save();renderAuctionIdle();">Keep drafting anyway</button></div>
+  <p class="muted" style="margin-top:10px;font-size:14px">Saved to your Draft Library on the Setup tab — start a new draft any time without losing this one.</p>`;
  if(NET.role==="host")publishState();}
 function returnPack(){stopTimers();
  if(S.currentPack){const L=S.currentPack.source;
@@ -1596,7 +1692,8 @@ function renderExport(){$("#exportBody").innerHTML=S.players.map((p,i)=>`
    <button class="btn" onclick="exp(${i},'json')">JSON</button>
    <button class="btn gold" onclick="exp(${i},'ydk')">EDOPro .ydk</button>
   </div></div>`).join("")||"<p class='muted'>No players yet.</p>";}
-function exp(i,kind){const p=S.players[i];const counts=collCounts(p);const fn=p.name.replace(/[^a-z0-9]/gi,"_");
+function exp(i,kind,src){const st=src||S;const p=st.players[i];const counts={};p.cards.forEach(n=>counts[n]=(counts[n]||0)+1);
+ const fn=p.name.replace(/[^a-z0-9]/gi,"_");
  if(kind==="txt"){const cats={Monsters:[],Spells:[],Traps:[]};
   Object.keys(counts).sort().forEach(n=>cats[catOf(cardOf(n))].push(`${n} x${counts[n]}`));
   download(fn+".txt",`${p.name} — Draft Collection\n\nMonsters\n${cats.Monsters.join("\n")||"-"}\n\nSpells\n${cats.Spells.join("\n")||"-"}\n\nTraps\n${cats.Traps.join("\n")||"-"}`);}
