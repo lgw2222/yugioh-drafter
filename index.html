@@ -201,6 +201,13 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <button class="btn small danger" id="btnDelMode">Delete custom</button>
     </div>
     <p class="muted" id="modeDesc" style="margin-top:10px;font-size:14px"></p>
+      <p class="muted" id="modeSpec" style="font-size:14px;color:var(--gold)"></p>
+      <details style="margin-top:10px"><summary class="btn small" style="display:inline-block">How every mode plays</summary>
+        <div id="modeGuide" style="margin-top:12px"></div></details>
+      <div class="row" style="margin-top:16px;justify-content:center">
+        <button class="btn gold big" id="btnStartDraft">▶ START DRAFT</button>
+      </div>
+      <p class="muted" style="text-align:center;font-size:13px;margin-top:6px">Starts the draft for everyone — host and joined players jump straight into the room.</p>
   </div>
   <div class="grid2">
     <div class="panel">
@@ -513,6 +520,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
 /* ================= UTILITIES ================= */
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function on(sel,ev,fn){const el=typeof sel==="string"?$(sel):sel;if(el)el.addEventListener(ev,fn);
+ else console.warn("missing element for listener:",sel);}
 function toast(msg,err){const t=document.createElement("div");t.className="toast"+(err?" err":"");t.textContent=msg;$("#toasts").appendChild(t);setTimeout(()=>t.remove(),3200);}
 function imgRetry(el){const n=+(el.dataset.r||0);el.dataset.r=n+1;
  const a=el.dataset.s0||"",b=el.dataset.s1||a;
@@ -575,7 +584,7 @@ function save(){if(store.set("yadm_state",JSON.stringify(S)))return;
 function load(){const raw=store.get("yadm_state");if(raw){try{S=Object.assign(freshState(),JSON.parse(raw));return true;}catch(e){}}S=freshState();return false;}
 
 /* ================= TABS ================= */
-$("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;switchView(b.dataset.view);});
+on("#tabs","click",e=>{const b=e.target.closest("button");if(!b)return;switchView(b.dataset.view);});
 function switchView(v){$$("#tabs button").forEach(b=>b.classList.toggle("active",b.dataset.view===v));
  $$("section.view").forEach(s=>s.classList.toggle("on",s.id==="view-"+v));
  if(v==="collections")renderCollections(); if(v==="history")renderHistory(); if(v==="stats")renderStats(); if(v==="export")renderExport(); if(v==="cards"){renderPool();renderSources();renderClassics();renderEraChips();renderSrcPresets();} if(v==="draft"){drawWheel();renderSourceControls();}}
@@ -600,8 +609,8 @@ function renderNameInputs(){const n=Math.min(12,Math.max(2,+$("#setPlayers").val
      <option value="shark" ${p.skill==="shark"?"selected":""}>Shark</option></select>
    </div></div>`;}
  $("#playerNames").innerHTML=html+"</div>";}
-$("#setPlayers").addEventListener("input",renderNameInputs);
-$("#btnApplySetup").addEventListener("click",()=>{
+on("#setPlayers","input",renderNameInputs);
+on("#btnApplySetup","click",()=>{
  const st=S.settings;st.numPlayers=Math.min(12,Math.max(2,+$("#setPlayers").value||4));
  st.startMoney=+$("#setMoney").value||1000;st.currency=$("#setCurrency").value||"Gold";
  st.timer=+$("#setTimer").value||20;st.speedTimer=+$("#setSpeedTimer").value||6;
@@ -614,7 +623,7 @@ $("#btnApplySetup").addEventListener("click",()=>{
  S.players.forEach(p=>{if(old.length===0||p.money===undefined)p.money=st.startMoney;});
  S.pack.cpp=Math.max(1,+$("#setCPP").value||8);S.pack.num=Math.max(1,+$("#setNumPacks").value||24);S.pack.seed=$("#setSeed").value.trim();
  initRng(); save(); renderPackInfo(); toast("Setup applied");});
-$("#btnResetDraft").addEventListener("click",()=>{
+on("#btnResetDraft","click",()=>{
  if(!confirm("Reset the entire draft? Collections, money, and history will be wiped. The card pool and wheel are kept."))return;
  const pool=S.pool,db=S.cardDB,wheel=S.wheel,presets=S.wheelPresets,pack=S.pack,settings=S.settings;
  const srcs=S.sources;S=freshState();S.pool=pool;S.cardDB=db;S.wheel=wheel;S.wheelPresets=presets;S.pack=pack;S.settings=settings;S.sources=srcs;
@@ -631,7 +640,7 @@ function renderRarityMode(){
  $("#setSimpleRar").checked=!!S.pack.simpleRarities;
  renderRarityRows();renderPctRows();}
 $$("input[name=rmode]").forEach(r=>r.addEventListener("change",e=>{S.pack.rarityMode=e.target.value;save();renderRarityMode();}));
-$("#setSimpleRar").addEventListener("change",e=>{S.pack.simpleRarities=e.target.checked;save();renderRarityMode();renderPool();
+on("#setSimpleRar","change",e=>{S.pack.simpleRarities=e.target.checked;save();renderRarityMode();renderPool();
  toast(e.target.checked?"Exotic rarities folded into the 5 classics":"Full printed rarities restored");});
 function renderPctRows(){const box=$("#pctRows");if(!box)return;box.innerHTML="";
  S.pack.percents.forEach((p,i)=>{const d=document.createElement("div");d.className="row";d.style.marginBottom="6px";
@@ -648,8 +657,8 @@ function renderPctRows(){const box=$("#pctRows");if(!box)return;box.innerHTML=""
   const t=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
   const q=$("#pctTotal");q.textContent=`Total: ${t.toFixed(1)}%`;q.style.color=Math.abs(t-100)<0.05?"var(--ok)":"var(--danger)";};
  box.onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){S.pack.percents.splice(+d,1);renderPctRows();save();}};}
-$("#btnAddPct").addEventListener("click",()=>{S.pack.percents.push({rarity:"Common",pct:0});renderPctRows();save();});
-$("#btnNormPct").addEventListener("click",()=>{const t=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
+on("#btnAddPct","click",()=>{S.pack.percents.push({rarity:"Common",pct:0});renderPctRows();save();});
+on("#btnNormPct","click",()=>{const t=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
  if(!t)return toast("Set some values first",true);
  S.pack.percents.forEach(p=>p.pct=Math.round((+p.pct||0)/t*1000)/10);save();renderPctRows();toast("Normalized to 100%");});
 
@@ -665,8 +674,8 @@ function updateSlotTotal(){const el=$("#slotTotal");if(!el)return;
  const t=S.pack.slots.reduce((a,x)=>a+(+x.count||0),0),cpp=S.pack.cpp;
  if(t>cpp){el.textContent=`${t} guaranteed / ${cpp} per pack — too many, extras are dropped`;el.style.color="var(--danger)";}
  else{el.textContent=`${t} guaranteed / ${cpp} per pack — ${cpp-t} random`;el.style.color="var(--ink-dim)";}}
-$("#btnAddRarity").addEventListener("click",()=>{S.pack.slots.push({rarity:"Rare",count:1});renderRarityRows();save();});
-$("#setCPP").addEventListener("input",()=>{S.pack.cpp=Math.max(1,+$("#setCPP").value||8);updateSlotTotal();});
+on("#btnAddRarity","click",()=>{S.pack.slots.push({rarity:"Rare",count:1});renderRarityRows();save();});
+on("#setCPP","input",()=>{S.pack.cpp=Math.max(1,+$("#setCPP").value||8);updateSlotTotal();});
 function renderPackInfo(){$("#poolInfo").textContent=`Pool: ${S.pool.length} cards left`;
  $("#packInfo").textContent=`Packs: ${S.packsOpened} opened / ${S.pack.num} planned`;}
 
@@ -743,8 +752,8 @@ function loadArchive(id){const d=readDraft(id);if(!d)return toast("That draft co
  closeModal();toast("Draft loaded — collections and history restored");}
 function deleteArchive(id){if(!confirm("Delete this saved draft permanently?"))return;
  store.del("yadm_draft_"+id);libSetIndex(libIndex().filter(e=>e.id!==id));renderLibrary();toast("Draft deleted");}
-$("#btnArchiveNow").addEventListener("click",()=>{archiveCurrent($("#archName").value.trim());$("#archName").value="";});
-$("#btnArchiveNew").addEventListener("click",()=>{
+on("#btnArchiveNow","click",()=>{archiveCurrent($("#archName").value.trim());$("#archName").value="";});
+on("#btnArchiveNew","click",()=>{
  if(S.history.length){const id=archiveCurrent($("#archName").value.trim());if(!id&&S.history.length)return;}
  $("#archName").value="";
  S.players.forEach(p=>{p.money=S.settings.startMoney;p.spent=0;p.bids=[];p.cards=[];});
@@ -815,8 +824,8 @@ function renderModeGuide(){const g=$("#modeGuide");if(!g)return;
   `<div style="margin-bottom:12px"><b style="color:var(--gold)">${esc(k)}</b><br>
    <span style="font-size:14px">${esc(m.d)}</span><br>
    <span class="muted" style="font-size:13px">${esc(m.s)}</span></div>`).join("");}
-$("#modeSel").addEventListener("change",showModeDesc);
-$("#btnApplyMode").addEventListener("click",()=>{const k=$("#modeSel").value;
+on("#modeSel","change",showModeDesc);
+on("#btnApplyMode","click",()=>{const k=$("#modeSel").value;
  if(GAME_MODES[k])GAME_MODES[k].apply();
  else if(S.customModes[k]){const m=JSON.parse(JSON.stringify(S.customModes[k]));
   Object.assign(S.settings,m.settings);Object.assign(S.pack,m.pack);
@@ -825,14 +834,14 @@ $("#btnApplyMode").addEventListener("click",()=>{const k=$("#modeSel").value;
  S.players.forEach(p=>{if(!p.bids.length)p.money=S.settings.startMoney;});
  save();renderSetup();renderWheelEditor();drawWheel();renderSourceControls();drawSourceWheel();
  toast(`${k} applied — tweak any field below`);});
-$("#btnSaveMode").addEventListener("click",()=>{const n=$("#modeName").value.trim();
+on("#btnSaveMode","click",()=>{const n=$("#modeName").value.trim();
  if(!n)return toast("Name your mode first",true);
  if(GAME_MODES[n])return toast("That name is taken by a built-in mode",true);
  S.customModes[n]={settings:JSON.parse(JSON.stringify(S.settings)),pack:JSON.parse(JSON.stringify(S.pack)),
   wheel:JSON.parse(JSON.stringify(S.wheel.entries)),
   sources:{mode:S.sources.mode,fixed:S.sources.fixed,entries:JSON.parse(JSON.stringify(S.sources.entries))}};
  save();renderModes();$("#modeSel").value=n;showModeDesc();toast(`Saved "${n}" as a game mode`);});
-$("#btnDelMode").addEventListener("click",()=>{const k=$("#modeSel").value;
+on("#btnDelMode","click",()=>{const k=$("#modeSel").value;
  if(!S.customModes[k])return toast("Built-in modes can't be deleted",true);
  delete S.customModes[k];save();renderModes();toast("Mode deleted");});
 
@@ -849,7 +858,7 @@ function playCinema(modeName,spec,names,then){
  const finish=()=>{if(done)return;done=true;c.classList.remove("on");c.onclick=null;then&&then();};
  c.onclick=finish;
  setTimeout(finish,3400);}
-$("#btnStartDraft").addEventListener("click",()=>{
+on("#btnStartDraft","click",()=>{
  const k=$("#modeSel").value;
  const haveCards=S.pool.length||S.sources.entries.length;
  if(!haveCards)return toast("Add cards first — Cards tab: import a pool or add a pack source",true);
@@ -863,8 +872,8 @@ $("#btnStartDraft").addEventListener("click",()=>{
   toast("Draft started — spin the wheel");});});
 
 /* ================= SAVE FILE ================= */
-$("#btnSaveFile").addEventListener("click",()=>download(`yadm-draft-${Date.now()}.json`,JSON.stringify(S,null,1),"application/json"));
-$("#loadFile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+on("#btnSaveFile","click",()=>download(`yadm-draft-${Date.now()}.json`,JSON.stringify(S,null,1),"application/json"));
+on("#loadFile","change",e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
  r.onload=()=>{try{S=Object.assign(freshState(),JSON.parse(r.result));initRng();save();renderSetup();renderPool();drawWheel();renderAuctionIdle();restoreAuction();toast("Draft loaded");}catch(err){toast("Could not read save file",true);}};r.readAsText(f);e.target.value="";});
 
 /* ================= CSV IMPORT + API ================= */
@@ -877,14 +886,14 @@ function parseCSV(text){const rows=[];let cur="",inQ=false,row=[];
   else cur+=c;}
  if(cur!==""||row.length){row.push(cur);rows.push(row);}
  return rows.filter(r=>r.some(c=>c.trim()));}
-$("#csvFile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+on("#csvFile","change",e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
  r.onload=async()=>{let rows=parseCSV(r.result);
   if(rows.length&&/name/i.test(rows[0][0])&&/rar/i.test(rows[0][1]||""))rows=rows.slice(1);
   S.pool=rows.map(r=>({name:r[0].trim(),rarity:(r[1]||"Common").trim()})).filter(c=>c.name);
   toast(`Imported ${S.pool.length} cards`);save();renderPackInfo();await fetchAllCards();};
  r.readAsText(f);e.target.value="";});
-$("#btnRefetch").addEventListener("click",fetchAllCards);
-$("#btnClearCache").addEventListener("click",()=>{S.cardDB={};save();renderPool();toast("Card cache cleared");});
+on("#btnRefetch","click",fetchAllCards);
+on("#btnClearCache","click",()=>{S.cardDB={};save();renderPool();toast("Card cache cleared");});
 
 async function fetchAllCards(){
  const names=[...new Set(S.pool.map(c=>c.name))].filter(n=>!S.cardDB[n]);
@@ -926,8 +935,8 @@ function renderPool(){const q=($("#poolSearch").value||"").toLowerCase();const r
    ${cardImg(d.imgS,d.img,"thumb")}
    <div class="nm">${esc(c.name)}<br><span class="rar ${rarKey(c.rarity)}">${esc(c.rarity)}</span></div></div>`;}).join("")
   +(list.length>400?`<p class="muted">…and ${list.length-400} more (search to narrow)</p>`:"");}
-$("#poolSearch").addEventListener("input",renderPool);
-$("#poolRarityFilter").addEventListener("change",renderPool);
+on("#poolSearch","input",renderPool);
+on("#poolRarityFilter","change",renderPool);
 function showCardModal(name){const c=cardOf(name);
  openModal(`<div class="carddetail">${cardImg(c.img,c.imgS)}
   <div><h2 style="color:var(--ink)">${esc(c.name)}</h2>
@@ -971,8 +980,8 @@ async function loadSetList(){if(SETLIST&&SETLIST.length)return;SETLIST=[];
   $("#setList").innerHTML=SETLIST.map(n=>`<option value="${esc(n)}">`).join("");}catch(e){SETLIST=[];}}
 /* ---------- pack source management ---------- */
 const SRC_COLORS=["#e8c15a","#8f7cff","#4fd8e8","#ff8c5a","#7ef0c0","#ff5f6e","#6ec1ff","#ff9ff5"];
-$("#srcKind").addEventListener("change",e=>{$("#srcSet").style.display=e.target.value==="set"?"":"none";});
-$("#btnAddSource").addEventListener("click",()=>{
+on("#srcKind","change",e=>{$("#srcSet").style.display=e.target.value==="set"?"":"none";});
+on("#btnAddSource","click",()=>{
  const kind=$("#srcKind").value;let entry;
  if(kind==="set"){const nm=$("#srcSet").value.trim();if(!nm)return toast("Type a set name first",true);
   entry={label:nm,kind:"set",setName:nm,q:"cardset="+encodeURIComponent(nm)};}
@@ -998,15 +1007,15 @@ function addPresetSource(k){const p=SRC_PRESETS[k];if(!p)return;
 /* ---------- source presets ---------- */
 function renderSrcPresets(){const sel=$("#srcPresetSel");if(!sel)return;
  sel.innerHTML=`<option value="">Load preset…</option>`+Object.keys(S.sourcePresets||{}).map(k=>`<option>${esc(k)}</option>`).join("");}
-$("#btnSaveSrcPreset").addEventListener("click",()=>{const n=$("#srcPresetName").value.trim();
+on("#btnSaveSrcPreset","click",()=>{const n=$("#srcPresetName").value.trim();
  if(!n)return toast("Name the preset first",true);
  if(!S.sources.entries.length)return toast("Add some sources first",true);
  S.sourcePresets[n]=JSON.parse(JSON.stringify(S.sources.entries));save();renderSrcPresets();
  toast(`Preset "${n}" saved — ${S.sources.entries.length} sources`);});
-$("#srcPresetSel").addEventListener("change",e=>{const k=e.target.value;if(!k)return;
+on("#srcPresetSel","change",e=>{const k=e.target.value;if(!k)return;
  S.sources.entries=JSON.parse(JSON.stringify(S.sourcePresets[k]));save();
  renderSources();renderSourceControls();drawSourceWheel();toast(`Loaded "${k}"`);});
-$("#btnDelSrcPreset").addEventListener("click",()=>{const k=$("#srcPresetSel").value;if(!k)return;
+on("#btnDelSrcPreset","click",()=>{const k=$("#srcPresetSel").value;if(!k)return;
  delete S.sourcePresets[k];save();renderSrcPresets();toast("Preset deleted");});
 
 function renderClassics(){const el=$("#classicSets");if(!el)return;
@@ -1067,7 +1076,7 @@ function classifySet(n){const t=(n||"").toLowerCase();
  if(/structure deck|starter deck|deck build|beginner|evolution deck/.test(t))return"deck";
  if(/tin|promo|prize|championship|tournament pack|duelist pack|duelist league|token|collection|collectible|mega.?pack|premium|gold series|dark legends|retro pack|turbo pack|hobby league|movie|anniversary|advent|box|tribute|selection|value|special edition|speed duel|duel terminal|battle pack|astral pack|star pack|sneak peek|ots|participation|series|bonus|sampler|demo|kit|accessories|case|reprint|maximum gold|toy|magazine|jump|shonen|weekly/.test(t))return"special";
  return"core";}
-$("#btnBrowseSets").addEventListener("click",browseSets);
+on("#btnBrowseSets","click",browseSets);
 
 function renderSources(){const box=$("#srcList");if(!box)return;
  if(!S.sources.entries.length){box.innerHTML=`<p class="muted">No sources yet — packs come from your imported pool.</p>`;return;}
@@ -1084,8 +1093,8 @@ function renderSources(){const box=$("#srcList");if(!box)return;
 
 /* ---------- source wheel + mode controls (Draft tab) ---------- */
 let srcAngle=0,srcSpinning=false,srcChoiceEntry=null;
-$("#srcMode").addEventListener("change",e=>{S.sources.mode=e.target.value;save();renderSourceControls();});
-$("#srcFixed").addEventListener("change",e=>{S.sources.fixed=e.target.value;save();renderSourceNote();});
+on("#srcMode","change",e=>{S.sources.mode=e.target.value;save();renderSourceControls();});
+on("#srcFixed","change",e=>{S.sources.fixed=e.target.value;save();renderSourceNote();});
 function renderSourceControls(){
  const has=S.sources.entries.length>0;
  $("#srcMode").value=S.sources.mode;
@@ -1093,19 +1102,27 @@ function renderSourceControls(){
  $("#srcFixed").innerHTML=S.sources.entries.map(e=>`<option ${e.label===S.sources.fixed?"selected":""}>${esc(e.label)}</option>`).join("");
  $("#srcWheelWrap").hidden=S.sources.mode!=="wheel";
  if(S.sources.mode==="wheel")drawSourceWheel();
- if(!has&&S.sources.mode!=="pool"){S.sources.mode="pool";$("#srcMode").value="pool";$("#srcWheelWrap").hidden=true;$("#srcFixed").hidden=true;}
+ if(!has&&S.sources.mode==="fixed"){S.sources.mode="pool";$("#srcMode").value="pool";$("#srcFixed").hidden=true;}
  renderSourceNote();}
 function renderSourceNote(){const el=$("#srcNote");if(!el)return;
- const m=S.sources.mode;
- if(!S.sources.entries.length){el.textContent=`Imported pool: ${S.pool.length} cards left. Add booster sets or eras on the Cards tab to unlock the source wheel.`;return;}
+ const m=S.sources.mode,ents=wheelSources();
  if(m==="pool")el.textContent=`Imported pool: ${S.pool.length} cards left.`;
- else if(m==="fixed")el.textContent=`Every pack comes from ${S.sources.fixed||S.sources.entries[0].label}.`;
- else el.textContent=srcChoiceEntry?`Next pack comes from ${srcChoiceEntry.label}.`:`Spin to pick which set or era the next pack comes from.`;}
-function drawSourceWheel(){const cv=$("#srcCanvas");if(!cv||!S.sources.entries.length)return;
- drawWheelOn(cv,S.sources.entries,srcAngle);}
-function spinSourceWheel(){if(srcSpinning||!S.sources.entries.length)return;srcSpinning=true;srcChoiceEntry=null;
+ else if(m==="fixed")el.textContent=S.sources.entries.length
+   ?`Every pack comes from ${S.sources.fixed||S.sources.entries[0].label}.`
+   :`No sources added yet — add booster sets or eras on the Cards tab.`;
+ else if(!ents.length)el.textContent=`Nothing to spin yet — import a pool or add pack sources on the Cards tab.`;
+ else if(srcChoiceEntry)el.textContent=`Next pack comes from ${srcChoiceEntry.label}.`;
+ else el.textContent=`On the wheel: ${ents.map(e=>e.label).join(", ")}. Spin to pick where the next pack comes from.`;}
+function wheelSources(){const list=S.sources.entries.slice();
+ if(S.pool.length)list.unshift({label:"Imported Pool",kind:"pool",pool:true,color:"#e8c15a",weight:1});
+ return list;}
+function drawSourceWheel(){const cv=$("#srcCanvas");if(!cv)return;const ents=wheelSources();
+ if(!ents.length)return;drawWheelOn(cv,ents,srcAngle);}
+function spinSourceWheel(){const ents=wheelSources();
+ if(srcSpinning||!ents.length)return toast("Nothing to spin — import a pool or add a pack source on the Cards tab",true);
+ srcSpinning=true;srcChoiceEntry=null;
  $("#srcResult").textContent="";
- const ents=S.sources.entries,tw=ents.reduce((a,e)=>a+(+e.weight||1),0);
+ const tw=ents.reduce((a,e)=>a+(+e.weight||1),0);
  let r=Math.random()*tw,idx=0;
  for(let i=0;i<ents.length;i++){r-=(+ents[i].weight||1);if(r<=0){idx=i;break;}}
  let start=0;for(let i=0;i<idx;i++)start+=(+ents[i].weight||1)/tw*Math.PI*2;
@@ -1123,8 +1140,8 @@ function spinSourceWheel(){if(srcSpinning||!S.sources.entries.length)return;srcS
   else{srcSpinning=false;srcChoiceEntry=ents[idx];$("#srcResult").textContent=ents[idx].label;
    fanfare();renderSourceNote();}}
  requestAnimationFrame(frame);}
-$("#srcHub").addEventListener("click",spinSourceWheel);
-$("#srcHub").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")spinSourceWheel();});
+on("#srcHub","click",spinSourceWheel);
+on("#srcHub","keydown",e=>{if(e.key==="Enter"||e.key===" ")spinSourceWheel();});
 
 function downloadPoolCSV(){if(!S.pool.length)return toast("Pool is empty",true);
  const rows=[["name","rarity"],...S.pool.map(c=>[c.name,c.rarity])];
@@ -1175,7 +1192,7 @@ Zaborg the Thunder Monarch,Super Rare`,"text/csv");
  toast("Sample CSV downloaded — 40-card Goat-style starter");}
 function openModal(html){$("#modalBox").innerHTML=`<button class="x" onclick="closeModal()">×</button>`+html;$("#modalBg").classList.add("on");}
 function closeModal(){$("#modalBg").classList.remove("on");}
-$("#modalBg").addEventListener("click",e=>{if(e.target.id==="modalBg")closeModal();});
+on("#modalBg","click",e=>{if(e.target.id==="modalBg")closeModal();});
 </script>
 <script>
 "use strict";
@@ -1231,8 +1248,8 @@ function spinWheel(){if(spinning||!S.wheel.entries.length)return;spinning=true;w
    S.wheel.history.unshift(wheelChoice);S.wheel.history=S.wheel.history.slice(0,20);
    $("#spinHistory").textContent=S.wheel.history.join(" · ");save();}}
  requestAnimationFrame(frame);}
-$("#wheelHub").addEventListener("click",spinWheel);
-$("#wheelHub").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")spinWheel();});
+on("#wheelHub","click",spinWheel);
+on("#wheelHub","keydown",e=>{if(e.key==="Enter"||e.key===" ")spinWheel();});
 /* wheel editor */
 function renderWheelEditor(){const box=$("#wheelEditor");box.innerHTML=S.wheel.entries.map((e,i)=>
  `<div class="entry-row">
@@ -1245,14 +1262,14 @@ function renderWheelEditor(){const box=$("#wheelEditor");box.innerHTML=S.wheel.e
  renderPresetSelect();
  box.oninput=e=>{const i=+e.target.dataset.i,k=e.target.dataset.k;if(k){S.wheel.entries[i][k]=k==="weight"?Math.max(1,+e.target.value||1):e.target.value;drawWheel();save();}};
  box.onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){S.wheel.entries.splice(+d,1);renderWheelEditor();drawWheel();save();}};}
-$("#btnAddEntry").addEventListener("click",()=>{S.wheel.entries.push({label:"New Entry",color:"#"+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,"0"),weight:1});renderWheelEditor();drawWheel();save();});
-$("#wheelSound").addEventListener("change",e=>{S.wheel.sound=e.target.checked;save();});
+on("#btnAddEntry","click",()=>{S.wheel.entries.push({label:"New Entry",color:"#"+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,"0"),weight:1});renderWheelEditor();drawWheel();save();});
+on("#wheelSound","change",e=>{S.wheel.sound=e.target.checked;save();});
 function renderPresetSelect(){$("#presetSelect").innerHTML=`<option value="">Load preset…</option>`+Object.keys(S.wheelPresets).map(k=>`<option>${esc(k)}</option>`).join("");}
-$("#btnSavePreset").addEventListener("click",()=>{const n=$("#presetName").value.trim();if(!n)return toast("Name the preset first",true);
+on("#btnSavePreset","click",()=>{const n=$("#presetName").value.trim();if(!n)return toast("Name the preset first",true);
  S.wheelPresets[n]=JSON.parse(JSON.stringify(S.wheel.entries));save();renderPresetSelect();toast(`Preset "${n}" saved`);});
-$("#presetSelect").addEventListener("change",e=>{const k=e.target.value;if(!k)return;
+on("#presetSelect","change",e=>{const k=e.target.value;if(!k)return;
  S.wheel.entries=JSON.parse(JSON.stringify(S.wheelPresets[k]));renderWheelEditor();drawWheel();save();toast(`Loaded "${k}"`);});
-$("#btnDelPreset").addEventListener("click",()=>{const k=$("#presetSelect").value;if(!k)return;delete S.wheelPresets[k];save();renderPresetSelect();toast("Preset deleted");});
+on("#btnDelPreset","click",()=>{const k=$("#presetSelect").value;if(!k)return;delete S.wheelPresets[k];save();renderPresetSelect();toast("Preset deleted");});
 
 /* ================= PACK GENERATION ================= */
 function buildPack(pool){const cpp=S.pack.cpp;if(!pool||!pool.length)return null;
@@ -1299,13 +1316,16 @@ function sourceRemaining(label){const e=S.sources.entries.find(x=>x.label===labe
 /* ================= AUCTION ENGINE ================= */
 let AU=null; // live auction runtime (timers live here, config mirrors S.pendingAuction)
 const HIDDEN_TYPES={"Blind Pack":0,"One Card Revealed":1,"Half Reveal":.5};
-$("#btnUseResult").addEventListener("click",()=>{if(!wheelChoice)return;startAuction(wheelChoice);});
+on("#btnUseResult","click",()=>{if(!wheelChoice)return;startAuction(wheelChoice);});
 async function pickSource(){
  const m=S.sources.mode;
- if(m==="pool"||!S.sources.entries.length)return{label:"",list:S.pool,set(v){S.pool=v;}};
+ if(m==="pool")return{label:"",list:S.pool,set(v){S.pool=v;}};
  let entry=null;
  if(m==="fixed")entry=S.sources.entries.find(e=>e.label===S.sources.fixed)||S.sources.entries[0];
- else entry=srcChoiceEntry||S.sources.entries[Math.floor(Math.random()*S.sources.entries.length)];
+ else{const ents=wheelSources();if(!ents.length)return{label:"",list:S.pool,set(v){S.pool=v;}};
+  entry=srcChoiceEntry||ents[Math.floor(Math.random()*ents.length)];}
+ if(!entry)return{label:"",list:S.pool,set(v){S.pool=v;}};
+ if(entry.pool)return{label:"Imported Pool",list:S.pool,set(v){S.pool=v;}};
  const list=await ensureSource(entry);
  if(!list)return null;
  return{label:entry.label,list,set(v){S.sourceCache[entry.label]=v;}};}
@@ -1646,8 +1666,8 @@ function binderSlots(items){return items.map(x=>`<div class="slot" onclick="show
  ${cardImg(x.c.imgS,x.c.img,"thumb")}
  ${x.qty>1?`<span class="qty">×${x.qty}</span>`:""}
  <div class="nm">${esc(x.n)}</div></div>`).join("");}
-$("#collSearch").addEventListener("input",renderCollBody);
-$("#collSort").addEventListener("change",renderCollBody);
+on("#collSearch","input",renderCollBody);
+on("#collSort","change",renderCollBody);
 
 /* ================= HISTORY ================= */
 function renderHistory(){const tb=$("#histTable tbody");
@@ -1735,7 +1755,7 @@ async function netInit(cfg){await fbLoad();
 function roomRef(path){return NET.db.ref("rooms/"+NET.code+(path?"/"+path:""));}
 
 /* ---------- HOST ---------- */
-$("#btnHostRoom").addEventListener("click",async()=>{
+on("#btnHostRoom","click",async()=>{
  let stored=null;try{stored=JSON.parse(store.get("yadm_fbcfg")||"null");}catch(e){}
  const cfg=parseCfg($("#fbConfig").value)||stored||DEFAULT_FB;
  if(!cfg.databaseURL&&!cfg.projectId)return toast("Config looks invalid",true);
@@ -1751,10 +1771,10 @@ $("#btnHostRoom").addEventListener("click",async()=>{
  $("#roomCodePill").hidden=false;$("#roomCodePill").textContent="Room "+NET.code;
  $("#btnCopyInvite").hidden=false;$("#btnLeaveRoom").hidden=false;$("#btnHostRoom").disabled=true;
  toast("Room "+NET.code+" is live — send friends the invite link");});
-$("#btnCopyInvite").addEventListener("click",()=>{
+on("#btnCopyInvite","click",()=>{
  const link=location.origin+location.pathname+"#join="+btoa(JSON.stringify({c:NET.cfg,r:NET.code}));
  navigator.clipboard?.writeText(link).then(()=>toast("Invite link copied"),()=>prompt("Copy this link:",link));});
-$("#btnLeaveRoom").addEventListener("click",()=>{if(NET.role==="host")roomRef().remove();location.reload();});
+on("#btnLeaveRoom","click",()=>{if(NET.role==="host")roomRef().remove();location.reload();});
 function renderRoster(claims){const el=$("#roster");if(!el)return;
  const rows=Object.entries(claims).map(([pi,c])=>`${esc(S.players[+pi]?.name||"Player "+(+pi+1))} — connected`);
  el.innerHTML=rows.length?("<b>Connected:</b> "+rows.join(" · ")):"";}
@@ -1794,7 +1814,7 @@ function applyAction(a){if(!a||NET.role!=="host")return;const pi=+a.pi;
 function publishStateLiveOnly(){if(NET.db)roomRef("state/live").set(buildLive());}
 
 /* ---------- CLIENT ---------- */
-$("#btnJoinRoom").addEventListener("click",async()=>{
+on("#btnJoinRoom","click",async()=>{
  const code=$("#joinCode").value.trim().toUpperCase();if(!code)return toast("Enter the room code",true);
  let stored=null;try{stored=JSON.parse(store.get("yadm_fbcfg")||"null");}catch(e){}
  const cfg=parseCfg($("#fbConfig").value)||stored||DEFAULT_FB;
