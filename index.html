@@ -1146,7 +1146,7 @@ function spinSourceWheel(){const ents=wheelSources();
   if(seg!==last){last=seg;beep(520+Math.random()*60,.03,.04);}
   if(p<1)requestAnimationFrame(frame);
   else{srcSpinning=false;srcChoiceEntry=ents[idx];$("#srcResult").textContent=ents[idx].label;
-   fanfare();renderSourceNote();}}
+   fanfare();renderSourceNote();maybeAutoOpen();}}
  requestAnimationFrame(frame);}
 on("#srcHub","click",spinSourceWheel);
 on("#srcHub","keydown",e=>{if(e.key==="Enter"||e.key===" ")spinSourceWheel();});
