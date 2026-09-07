@@ -390,7 +390,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
 <section class="view" id="view-draft">
   <h2>Draft Room</h2>
   <p class="sub" id="draftSub">Spin the wheel to decide how the next pack gets auctioned.</p>
-  <div class="panel" style="padding:12px 16px;margin-bottom:16px"><div class="row" id="rosterStrip"></div></div>
+  <div class="panel" style="padding:12px 16px;margin-bottom:16px">
+    <div class="row" id="rosterStrip"></div>
+    <div class="muted" id="draftLog" style="font-size:13px;margin-top:8px;font-family:monospace"></div>
+  </div>
   <div class="grid2">
     <div class="panel" id="wheelPanel">
       <h3>Auction Wheel</h3>
@@ -679,6 +682,9 @@ function updateSlotTotal(){const el=$("#slotTotal");if(!el)return;
  else{el.textContent=`${t} guaranteed / ${cpp} per pack — ${cpp-t} random`;el.style.color="var(--ink-dim)";}}
 on("#btnAddRarity","click",()=>{S.pack.slots.push({rarity:"Rare",count:1});renderRarityRows();save();});
 on("#setCPP","input",()=>{S.pack.cpp=Math.max(1,+$("#setCPP").value||8);updateSlotTotal();});
+let LOG=[];
+function dlog(msg){LOG.unshift(new Date().toLocaleTimeString().replace(/:\d+ /," ")+" — "+msg);LOG=LOG.slice(0,4);
+ const el=$("#draftLog");if(el)el.innerHTML=LOG.map((l,i)=>`<div style="opacity:${1-i*0.22}">${esc(l)}</div>`).join("");}
 function renderRoster2(){const el=$("#rosterStrip");if(!el)return;
  const cur=S.settings.currency;
  el.innerHTML=`<span class="muted" style="font-size:13px;letter-spacing:.1em">DUELISTS:</span>`+
@@ -1146,7 +1152,7 @@ function spinSourceWheel(){const ents=wheelSources();
   if(seg!==last){last=seg;beep(520+Math.random()*60,.03,.04);}
   if(p<1)requestAnimationFrame(frame);
   else{srcSpinning=false;srcChoiceEntry=ents[idx];$("#srcResult").textContent=ents[idx].label;
-   fanfare();renderSourceNote();maybeAutoOpen();}}
+   fanfare();renderSourceNote();dlog("source wheel: "+ents[idx].label);maybeAutoOpen();}}
  requestAnimationFrame(frame);}
 on("#srcHub","click",spinSourceWheel);
 on("#srcHub","keydown",e=>{if(e.key==="Enter"||e.key===" ")spinSourceWheel();});
@@ -1254,7 +1260,7 @@ function spinWheel(){if(spinning||!S.wheel.entries.length)return;spinning=true;w
    $("#wheelResult").textContent=wheelChoice;fanfare();
    $("#btnUseResult").disabled=false;
    S.wheel.history.unshift(wheelChoice);S.wheel.history=S.wheel.history.slice(0,20);
-   $("#spinHistory").textContent=S.wheel.history.join(" · ");save();maybeAutoOpen();}}
+   $("#spinHistory").textContent=S.wheel.history.join(" · ");save();dlog("auction wheel: "+wheelChoice);maybeAutoOpen();}}
  requestAnimationFrame(frame);}
 function maybeAutoOpen(){
  const cb=$("#autoOpen");if(!cb||!cb.checked)return;
@@ -1357,13 +1363,23 @@ async function pickSource(){
  if(!list)return null;
  return{label:entry.label,list,set(v){S.sourceCache[entry.label]=v;}};}
 async function startAuction(type){
- if(S.pendingAuction)return toast("A pack is already open — finish it first",true);
+ try{return await startAuctionInner(type);}
+ catch(e){const m=String(e&&e.message||e);
+  dlog("ERROR: "+m.slice(0,70));
+  $("#auctionStage").innerHTML=`<div class="atype" style="color:var(--danger)">Something broke opening the pack</div>
+   <p class="muted" style="margin:10px 0">${esc(m.slice(0,160))}</p>
+   <div class="row" style="justify-content:center"><button class="btn" onclick="renderAuctionIdle()">OK</button></div>`;
+  toast("Pack failed to open — see the draft room for details",true);}}
+async function startAuctionInner(type){
+ if(S.pendingAuction){toast("A pack is already open — finish it first",true);dlog("blocked: pack already open");return;}
  if(S.packsOpened>=S.pack.num&&!confirm("Planned pack count reached — open another anyway?"))return;
+ dlog(`opening ${type}…`);
  const src=await pickSource();
- if(!src)return; // pickSource already explained why on screen
+ if(!src){dlog("no source available");return;}
  const built=buildPack(src.list);
  if(!built||!built.cards.length)return toast(src.label?`${src.label} is out of cards`:"Card pool is empty — import cards first",true);
  if(built.cards.length<S.pack.cpp)toast(`${src.label||"Pool"} only had ${built.cards.length} cards left for this pack`);
+ dlog(`pack #${S.packsOpened+1}: ${built.cards.length} cards from ${src.label||"imported pool"}`);
  const cards=built.cards;src.set(built.rest);
  S.packsOpened++;
  const revealAll=!(type in HIDDEN_TYPES);
@@ -1377,7 +1393,7 @@ async function startAuction(type){
  save();renderPackInfo();
  renderPackFan();
  runAuctionUI(type);
- renderRoster2();
+ renderRoster2();dlog(`${type} live — bid below`);
  setTimeout(()=>{const st=$("#auctionStage");if(st&&st.scrollIntoView)st.scrollIntoView({behavior:"smooth",block:"center"});},80);
  if(!S.players.some(p=>p.cpu)&&NET.role!=="host"&&S.players.length>1)
   toast("Nobody is set to CPU — bid from the buttons below, or enable CPU on the Setup tab");
@@ -1521,7 +1537,8 @@ function noBids(){const t=S.pendingAuction?S.pendingAuction.type:"Public Auction
   <div class="row" style="justify-content:center;margin-top:12px">
    <button class="btn gold" onclick="reopenPack('${esc(t)}')">Reopen this pack</button>
    <button class="btn" onclick="returnPack()">Return to pool</button></div>`;
- toast("No bids — pack is waiting");}
+ toast("No bids — pack is waiting");dlog("no bids — pack held");}
+function noBidsLogged(){}
 function reopenPack(type){if(!S.currentPack)return renderAuctionIdle();
  S.pendingAuction={type,phase:"live"};save();
  renderPackFan();runAuctionUI(type);
@@ -1632,7 +1649,7 @@ function resolveWin(pi,amount){stopTimers();const p=S.players[pi],cur=S.settings
   <div class="row" style="justify-content:center;margin-top:16px">
    <button class="btn gold big" onclick="renderAuctionIdle();switchView('draft')">Next pack →</button>
    <button class="btn" onclick="switchView('collections')">View collection</button></div>`;
- toast(`${p.name} wins for ${fmt(amount)} ${cur}!`);renderPackInfo();renderRoster2();
+ toast(`${p.name} wins for ${fmt(amount)} ${cur}!`);renderPackInfo();renderRoster2();dlog(`${p.name} won pack #${cp.num} for ${fmt(amount)}`);
  if(S.packsOpened>=S.pack.num){S.finished=true;save();
   if(!S.archivedId)archiveCurrent(`${S.modeName||"Draft"} — ${new Date().toLocaleDateString()}`,true);
   setTimeout(showFinale,1400);}}
