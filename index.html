@@ -440,10 +440,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
       </div>
       <p class="muted" id="srcNote" style="font-size:14px"></p>
     </div>
-    <div class="panel">
-      <div class="auction-stage" id="auctionStage">
-        <p class="muted" style="padding:40px 0">No pack open. Spin the wheel, then open the next pack.</p>
-      </div>
+  </div>
+  <div class="panel" style="margin-top:18px">
+    <div class="auction-stage" id="auctionStage">
+      <p class="muted" style="padding:40px 0">No pack open. Spin the wheel, then open the next pack.</p>
     </div>
   </div>
   <div class="panel" style="margin-top:18px" id="packPanel" hidden>
@@ -1351,11 +1351,13 @@ async function pickSource(){
  if(!list)return null;
  return{label:entry.label,list,set(v){S.sourceCache[entry.label]=v;}};}
 async function startAuction(type){
+ if(S.pendingAuction)return toast("A pack is already open — finish it first",true);
  if(S.packsOpened>=S.pack.num&&!confirm("Planned pack count reached — open another anyway?"))return;
  const src=await pickSource();
  if(!src)return; // pickSource already explained why on screen
  const built=buildPack(src.list);
  if(!built||!built.cards.length)return toast(src.label?`${src.label} is out of cards`:"Card pool is empty — import cards first",true);
+ if(built.cards.length<S.pack.cpp)toast(`${src.label||"Pool"} only had ${built.cards.length} cards left for this pack`);
  const cards=built.cards;src.set(built.rest);
  S.packsOpened++;
  const revealAll=!(type in HIDDEN_TYPES);
@@ -1369,6 +1371,7 @@ async function startAuction(type){
  save();renderPackInfo();
  renderPackFan();
  runAuctionUI(type);
+ setTimeout(()=>{const st=$("#auctionStage");if(st&&st.scrollIntoView)st.scrollIntoView({behavior:"smooth",block:"center"});},80);
  $("#wheelResult").textContent="";$("#btnUseResult").disabled=true;wheelChoice=null;
  srcChoiceEntry=null;$("#srcResult").textContent="";renderSourceNote();}
 function renderPackFan(reveal=false){const cp=S.currentPack;const panel=$("#packPanel");
@@ -1499,8 +1502,21 @@ function tickPublic(init){if(!AU)return;if(!init)AU.time-=0.2;
  const f=$("#tfill");if(f){f.style.width=Math.max(0,AU.time/AU.max*100)+"%";$("#tbar").classList.toggle("hot",AU.time<=5);}
  if(AU.time<=3&&AU.time>0&&Math.abs(AU.time%1)<0.21)beep(1000,.05,.05);
  if(AU.time<=0){clearInterval(AU.int);
-  if(AU.leader===null){toast("No bids — pack returned to pool");returnPack();}
+  if(AU.leader===null)noBids();
   else resolveWin(AU.leader,AU.bid);}}
+function noBids(){const t=S.pendingAuction?S.pendingAuction.type:"Public Auction";
+ stopTimers();S.pendingAuction=null;save();
+ renderPackFan(true);
+ $("#auctionStage").innerHTML=`<div class="atype">Nobody bid</div>
+  <p class="muted" style="margin:10px 0">Pack #${S.currentPack?S.currentPack.num:""} got no bids. It's still here — reopen it, or send it back to the pool.</p>
+  <div class="row" style="justify-content:center;margin-top:12px">
+   <button class="btn gold" onclick="reopenPack('${esc(t)}')">Reopen this pack</button>
+   <button class="btn" onclick="returnPack()">Return to pool</button></div>`;
+ toast("No bids — pack is waiting");}
+function reopenPack(type){if(!S.currentPack)return renderAuctionIdle();
+ S.pendingAuction={type,phase:"live"};save();
+ renderPackFan();runAuctionUI(type);
+ const st=$("#auctionStage");if(st&&st.scrollIntoView)st.scrollIntoView({behavior:"smooth",block:"center"});}
 function pubBid(i,inc){if(!AU)return;const p=S.players[i];const nb=AU.bid+inc;
  if(nb>p.money)return toast(`${p.name} can't afford ${fmt(nb)}`,true);
  placePublic(i,nb);}
@@ -1527,7 +1543,7 @@ function runDutch(){const st=S.settings,cur=st.currency;
   <div class="row" style="justify-content:center;margin-top:14px"><button class="btn danger small" onclick="cancelPack()">Cancel pack</button></div>`;
  cpuDutchCheck();
  AU.dutchInt=setInterval(()=>{AU.price=Math.max(0,AU.price-st.dutchStep);$("#curBid").textContent=fmt(AU.price);beep(430,.03,.03);animateBid();cpuDutchCheck();
-  if(AU.price<=0){clearInterval(AU.dutchInt);toast("Price hit zero — pack returned");returnPack();}},st.dutchInt*1000);}
+  if(AU.price<=0){clearInterval(AU.dutchInt);noBids();}},st.dutchInt*1000);}
 function dutchBuy(i){if(!AU)return;const p=S.players[i];
  if(AU.price>p.money)return toast(`${p.name} can't afford ${fmt(AU.price)}`,true);
  const price=AU.price;clearInterval(AU.dutchInt);resolveWin(i,price);}
