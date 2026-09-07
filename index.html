@@ -402,6 +402,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="row" style="justify-content:center;margin-top:8px">
         <button class="btn gold" id="btnUseResult" disabled>Open next pack with this auction</button>
       </div>
+      <label class="row" style="justify-content:center;gap:6px;font-size:14px;margin-top:8px">
+        <input type="checkbox" id="autoOpen" checked> Open the pack automatically once the wheels land</label>
       <details style="margin-top:16px">
         <summary class="btn small" style="display:inline-block">Edit wheel</summary>
         <div style="margin-top:12px" id="wheelEditor"></div>
@@ -1246,8 +1248,14 @@ function spinWheel(){if(spinning||!S.wheel.entries.length)return;spinning=true;w
    $("#wheelResult").textContent=wheelChoice;fanfare();
    $("#btnUseResult").disabled=false;
    S.wheel.history.unshift(wheelChoice);S.wheel.history=S.wheel.history.slice(0,20);
-   $("#spinHistory").textContent=S.wheel.history.join(" · ");save();}}
+   $("#spinHistory").textContent=S.wheel.history.join(" · ");save();maybeAutoOpen();}}
  requestAnimationFrame(frame);}
+function maybeAutoOpen(){
+ const cb=$("#autoOpen");if(!cb||!cb.checked)return;
+ if(!wheelChoice||spinning||srcSpinning)return;
+ if(S.pendingAuction)return;                                  // a pack is already live
+ if(S.sources.mode==="wheel"&&wheelSources().length&&!srcChoiceEntry)return; // still need a source spin
+ setTimeout(()=>{if(wheelChoice&&!S.pendingAuction)startAuction(wheelChoice);},700);}
 on("#wheelHub","click",spinWheel);
 on("#wheelHub","keydown",e=>{if(e.key==="Enter"||e.key===" ")spinWheel();});
 /* wheel editor */
@@ -1294,7 +1302,9 @@ function buildPack(pool){const cpp=S.pack.cpp;if(!pool||!pool.length)return null
  return{cards:shuffle(pack),rest:pool.filter((_,i)=>!taken.has(i))};}
 
 /* ---------- pack sources ---------- */
-const SRC_PRESETS={goat:{label:"Goat Format",q:"format=goat"},edison:{label:"Edison Format",q:"format=edison"},
+const SRC_PRESETS={
+ goat:{label:"Goat Format",q:"format=goat",q2:"startdate=2002-03-01&enddate=2005-04-01&dateregion=tcg_date"},
+ edison:{label:"Edison Format",q:"format=edison",q2:"startdate=2002-03-01&enddate=2010-03-01&dateregion=tcg_date"},
  dm:{label:"DM Era",q:"startdate=2002-03-01&enddate=2004-10-01&dateregion=tcg_date"},
  gx:{label:"GX Era",q:"startdate=2004-10-01&enddate=2008-09-02&dateregion=tcg_date"},
  syn:{label:"Synchro Era",q:"startdate=2008-09-02&enddate=2011-07-08&dateregion=tcg_date"},
@@ -1304,12 +1314,23 @@ const SRC_PRESETS={goat:{label:"Goat Format",q:"format=goat"},edison:{label:"Edi
 async function ensureSource(entry){
  if(S.sourceCache[entry.label]&&S.sourceCache[entry.label].length)return S.sourceCache[entry.label];
  toast(`Loading ${entry.label}…`);
- try{const r=await fetch(API+"cardinfo.php?"+entry.q);const j=await r.json();
-  if(j.error||!j.data)throw new Error(j.error||"no data");
-  const list=j.data.map(c=>{S.cardDB[c.name]=slimCard(c);return{name:c.name,rarity:firstRarity(c,entry.kind==="set"?entry.setName:null)};});
-  S.sourceCache[entry.label]=list;save();
-  toast(`${entry.label} ready — ${list.length} cards`);return list;}
- catch(e){toast(`Couldn't load ${entry.label}`,true);return null;}}
+ const tries=[entry.q,entry.q2||(SRC_PRESETS[Object.keys(SRC_PRESETS).find(k=>SRC_PRESETS[k].label===entry.label)]||{}).q2].filter(Boolean);
+ let lastErr="";
+ for(const q of tries){
+  try{const r=await fetch(API+"cardinfo.php?"+q);const j=await r.json();
+   if(j.error||!j.data||!j.data.length){lastErr=j.error||"no cards returned";continue;}
+   const list=j.data.map(c=>{S.cardDB[c.name]=slimCard(c);return{name:c.name,rarity:firstRarity(c,entry.kind==="set"?entry.setName:null)};});
+   S.sourceCache[entry.label]=list;save();renderSources();
+   toast(`${entry.label} ready — ${list.length} cards`);return list;}
+  catch(e){lastErr=String(e.message||e);}}
+ sourceError(entry.label,lastErr);return null;}
+function sourceError(label,why){
+ toast(`Couldn't load ${label}`,true);
+ const st=$("#auctionStage");
+ if(st&&!S.pendingAuction)st.innerHTML=`<div class="atype" style="color:var(--danger)">Source unavailable</div>
+  <p class="muted" style="margin:10px 0">Couldn't pull <b>${esc(label)}</b> from YGOPRODeck${why?` — ${esc(String(why).slice(0,90))}`:""}.</p>
+  <p class="muted">Spin again for a different source, or remove it on the Cards tab.</p>
+  <div class="row" style="justify-content:center;margin-top:14px"><button class="btn" onclick="renderAuctionIdle()">OK</button></div>`;}
 function sourceRemaining(label){const e=S.sources.entries.find(x=>x.label===label);
  if(!e)return S.pool.length;return (S.sourceCache[label]||[]).length;}
 
@@ -1332,7 +1353,7 @@ async function pickSource(){
 async function startAuction(type){
  if(S.packsOpened>=S.pack.num&&!confirm("Planned pack count reached — open another anyway?"))return;
  const src=await pickSource();
- if(!src)return;
+ if(!src)return; // pickSource already explained why on screen
  const built=buildPack(src.list);
  if(!built||!built.cards.length)return toast(src.label?`${src.label} is out of cards`:"Card pool is empty — import cards first",true);
  const cards=built.cards;src.set(built.rest);
