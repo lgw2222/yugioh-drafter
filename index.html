@@ -1571,12 +1571,13 @@ function rnd(a,b){return a+Math.random()*(b-a);}
 function cpuMaxBid(pi){const p=S.players[pi],cp=S.currentPack;if(!p||!cp)return 0;
  const sk=SKILL[p.skill]||SKILL.normal;
  const cpp=cp.cards.length||1;
+ const base=poolBaseline(pi);                             // what this pool typically offers
  const seen=cp.cards.filter((_,i)=>cp.revealed.includes(i));
- const seenAvg=seen.length?seen.reduce((a,c)=>a+cpuCardValue(c.name,c.rarity,pi),0)/seen.length:4.5;
+ const seenAvg=seen.length?seen.reduce((a,c)=>a+cpuCardValue(c.name,c.rarity,pi),0)/seen.length:base;
  let score=0;
- cp.cards.forEach((c,i)=>{score+=cp.revealed.includes(i)?cpuCardValue(c.name,c.rarity,pi):Math.min(seenAvg,7);});
- const expected=cpp*4.5;                                  // an unremarkable pack
- const ratio=Math.max(.25,Math.min(3,score/expected));
+ cp.cards.forEach((c,i)=>{score+=cp.revealed.includes(i)?cpuCardValue(c.name,c.rarity,pi):Math.min(seenAvg,base*1.6);});
+ const expected=cpp*base;                                 // an average pack FROM THIS POOL
+ const ratio=Math.max(.25,Math.min(3.5,score/expected))*poolScarcity(pi,score,cpp);
  const packsLeft=Math.max(1,S.pack.num-S.packsOpened+1);
  const share=Math.max(1,Math.ceil(packsLeft/Math.max(1,S.players.length)));
  const budget=p.money/share;
@@ -1585,6 +1586,39 @@ function cpuMaxBid(pi){const p=S.players[pi],cp=S.currentPack;if(!p||!cp)return 
  max=Math.min(max,p.money*reserve);
  if(p.money<=3)max=Math.min(max,p.money);
  return Math.max(0,Math.min(p.money,Math.round(max)));}
+let POOLBASE={key:"",val:4.5};
+function currentSourceList(){
+ const m=S.sources.mode,lab=S.currentPack&&S.currentPack.source;
+ if(lab==="Combined Set")return S.sourceCache[COMBINED_KEY]||[];
+ if(lab&&lab!=="Imported Pool"&&S.sourceCache[lab])return S.sourceCache[lab];
+ if(m==="combined")return S.sourceCache[COMBINED_KEY]||S.pool;
+ if(m==="fixed"){const e=S.sources.entries.find(x=>x.label===S.sources.fixed)||S.sources.entries[0];
+  if(e&&S.sourceCache[e.label])return S.sourceCache[e.label];}
+ return S.pool;}
+// what an average card out of THIS pool is worth to THIS player
+function poolBaseline(pi){
+ const list=currentSourceList();
+ if(!list||list.length<8)return 4.5;
+ const key=pi+"|"+(S.currentPack?S.currentPack.source:"")+"|"+Math.floor(list.length/25)+"|"+(S.players[pi].cards.length);
+ if(POOLBASE.key===key)return POOLBASE.val;
+ const step=Math.max(1,Math.floor(list.length/250));       // sample, don't score 5000 cards
+ let sum=0,n=0;
+ for(let i=0;i<list.length;i+=step){sum+=cpuCardValue(list[i].name,list[i].rarity,pi);n++;}
+ const val=n?Math.max(1.5,sum/n):4.5;
+ POOLBASE={key,val};
+ return val;}
+// how rare is a card this good in what's left?
+function poolScarcity(pi,score,cpp){
+ const list=currentSourceList();
+ if(!list||list.length<20)return 1;
+ const base=poolBaseline(pi);
+ const premium=list.length? (function(){const step=Math.max(1,Math.floor(list.length/250));let hits=0,n=0;
+  for(let i=0;i<list.length;i+=step){if(cpuCardValue(list[i].name,list[i].rarity,pi)>base*2.2)hits++;n++;}
+  return n?hits/n:0;})() : 0;
+ // if premium cards are scarce in this pool, a pack holding one is worth stretching for
+ if(premium<0.04&&score>base*cpp*1.4)return 1.25;
+ if(premium<0.10&&score>base*cpp*1.3)return 1.12;
+ return 1;}
 function cpuClear(){if(AU&&AU.cpuT){AU.cpuT.forEach(t=>clearTimeout(t));AU.cpuT=[];}}
 function cpuArm(fn,lo,hi){if(!AU)return;AU.cpuT=AU.cpuT||[];AU.cpuT.push(setTimeout(fn,rnd(lo,hi)));}
 /* public / speed: bots react to the standing bid */
