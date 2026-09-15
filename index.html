@@ -566,8 +566,9 @@ function simplifyRarity(r){const t=(r||"").toLowerCase();
  if(/super/.test(t))return"Super Rare";
  if(/rare/.test(t))return"Rare";
  return"Common";}
-function normRar(r){return S.pack.simpleRarities?simplifyRarity(r):r;}
-function rarKey(r){r=(r||"common").toLowerCase();
+function normRar(r){const c=validRarity(r)?String(r).trim():"Common";
+ return S.pack.simpleRarities?simplifyRarity(c):c;}
+function rarKey(r){r=(validRarity(r)?String(r):"common").toLowerCase();
  if(r.includes("starlight")||r.includes("prismatic")||r.includes("collector")||r.includes("quarter century"))return"secret";
  if(r.includes("secret"))return"secret";
  if(r.includes("ultimate"))return"ultimate";
@@ -976,9 +977,14 @@ function showCardModal(name){const c=cardOf(name);
   <p style="margin-top:12px;color:var(--ink-dim);font-size:15px">${esc(c.desc)}</p></div></div>`);}
 /* ================= CARD LIBRARY ================= */
 const API="https://db.ygoprodeck.com/api/v7/";
+function validRarity(r){return typeof r==="string"&&/[a-z]{3}/i.test(r);}
+function cleanRarity(r){return validRarity(r)?r.trim():null;}
 function firstRarity(c,setName){const ss=c.card_sets||[];
- if(setName){const m=ss.find(s=>s.set_name.toLowerCase()===setName.toLowerCase());if(m)return m.set_rarity||"Common";}
- return ss[0]?.set_rarity||"Common";}
+ let cand=[];
+ if(setName){cand=ss.filter(x=>x.set_name&&x.set_name.toLowerCase()===setName.toLowerCase()).map(x=>x.set_rarity);}
+ cand=cand.concat(ss.map(x=>x.set_rarity));           // fall through to other printings
+ const good=cand.map(cleanRarity).find(Boolean);
+ return good||"Common";}
 async function libImport(url,label,setName){
  $("#libStatus").textContent=`Loading ${label}…`;$("#libBar").style.width="15%";
  let data;
@@ -1808,7 +1814,14 @@ function exp(i,kind,src){const st=src||S;const p=st.players[i];const counts={};p
 
 /* ================= BOOT ================= */
 window.addEventListener("resize",()=>{const cv=$("#confettiCanvas");cv.width=innerWidth;cv.height=innerHeight;});
+function repairRarities(){let fixed=0;
+ const fix=l=>{if(!Array.isArray(l))return;l.forEach(c=>{if(!validRarity(c.rarity)){c.rarity="Common";fixed++;}});};
+ fix(S.pool);Object.values(S.sourceCache||{}).forEach(fix);
+ (S.history||[]).forEach(h=>fix(h.cards));
+ if(fixed)save();
+ return fixed;}
 (function boot(){load();initRng();
+ const fixedR=repairRarities();if(fixedR)setTimeout(()=>toast(`Cleaned ${fixedR} bad rarity labels from card data`),900);
  if(S.players.length===0){S.players=Array.from({length:S.settings.numPlayers},(_,i)=>({name:`Player ${i+1}`,money:S.settings.startMoney,spent:0,bids:[],cards:[]}));}
  renderModes();renderModeGuide();renderSetup();renderWheelEditor();drawWheel();renderPool();renderSources();renderClassics();renderEraChips();renderSrcPresets();renderSourceControls();restoreAuction();
  $("#srcSet").style.display=$("#srcKind").value==="set"?"":"none";})();
