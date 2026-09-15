@@ -543,6 +543,22 @@ function shuffle(arr,rng=RNG){const a=arr.slice();for(let i=a.length-1;i>0;i--){
 const fmt=n=>Number(n).toLocaleString();
 function download(name,text,mime="text/plain"){const b=new Blob([text],{type:mime});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
 const SIMPLE_RARITIES=["Common","Rare","Super Rare","Ultra Rare","Secret Rare"];
+const ALL_RARITIES=["Common","Short Print","Super Short Print","Rare","Super Rare","Ultra Rare",
+ "Ultimate Rare","Secret Rare","Prismatic Secret Rare","Extra Secret Rare","Quarter Century Secret Rare",
+ "Ghost Rare","Starlight Rare","Collector's Rare","Gold Rare","Premium Gold Rare","Platinum Rare",
+ "Parallel Rare","Super Parallel Rare","Ultra Parallel Rare","Duel Terminal Normal Parallel Rare",
+ "Mosaic Rare","Shatterfoil Rare","Starfoil Rare","Normal Parallel Rare"];
+function rarityOptions(){
+ if(S.pack.simpleRarities)return SIMPLE_RARITIES.slice();
+ const found=new Set();
+ S.pool.forEach(c=>c.rarity&&found.add(c.rarity));
+ Object.values(S.sourceCache||{}).forEach(l=>l.forEach(c=>c.rarity&&found.add(c.rarity)));
+ const extra=[...found].filter(r=>!ALL_RARITIES.includes(r)).sort();
+ return ALL_RARITIES.concat(extra);}
+function raritySelect(val,attrs){const opts=rarityOptions();
+ const list=opts.includes(val)||!val?opts:[val].concat(opts);
+ return `<select ${attrs} style="width:210px">${list.map(r=>
+  `<option${r===val?" selected":""}>${esc(r)}</option>`).join("")}</select>`;}
 function simplifyRarity(r){const t=(r||"").toLowerCase();
  // premium/chase printings all fold to the top tier
  if(/starlight|prismatic|collector|quarter century|ghost|ultimate|platinum|secret/.test(t))return"Secret Rare";
@@ -650,18 +666,17 @@ on("#setSimpleRar","change",e=>{S.pack.simpleRarities=e.target.checked;save();re
  toast(e.target.checked?"Exotic rarities folded into the 5 classics":"Full printed rarities restored");});
 function renderPctRows(){const box=$("#pctRows");if(!box)return;box.innerHTML="";
  S.pack.percents.forEach((p,i)=>{const d=document.createElement("div");d.className="row";d.style.marginBottom="6px";
-  d.innerHTML=`<input type="text" value="${esc(p.rarity)}" data-i="${i}" data-k="rarity" list="rarSuggest" style="width:170px">
-   <input type="number" min="0" max="100" step="0.5" value="${p.pct}" data-i="${i}" data-k="pct" style="width:80px"><span class="muted">%</span>
+  d.innerHTML=raritySelect(p.rarity,`data-i="${i}" data-k="rarity"`)+
+   `<input type="number" min="0" max="100" step="0.5" value="${p.pct}" data-i="${i}" data-k="pct" style="width:80px"><span class="muted">%</span>
    <button class="btn small danger" data-del="${i}">✕</button>`;box.appendChild(d);});
- if(!$("#rarSuggest")){const dl=document.createElement("datalist");dl.id="rarSuggest";
-  dl.innerHTML=SIMPLE_RARITIES.map(r=>`<option value="${r}">`).join("");document.body.appendChild(dl);}
  const tot=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
  const el=$("#pctTotal");el.textContent=`Total: ${tot.toFixed(1)}%`;
  el.style.color=Math.abs(tot-100)<0.05?"var(--ok)":"var(--danger)";
- box.oninput=e=>{const i=+e.target.dataset.i,k=e.target.dataset.k;if(!k)return;
+ const upd=e=>{const i=+e.target.dataset.i,k=e.target.dataset.k;if(!k)return;
   S.pack.percents[i][k]=k==="pct"?Math.max(0,+e.target.value||0):e.target.value;save();
   const t=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
   const q=$("#pctTotal");q.textContent=`Total: ${t.toFixed(1)}%`;q.style.color=Math.abs(t-100)<0.05?"var(--ok)":"var(--danger)";};
+ box.oninput=upd;box.onchange=upd;
  box.onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){S.pack.percents.splice(+d,1);renderPctRows();save();}};}
 on("#btnAddPct","click",()=>{S.pack.percents.push({rarity:"Common",pct:0});renderPctRows();save();});
 on("#btnNormPct","click",()=>{const t=S.pack.percents.reduce((a,p)=>a+(+p.pct||0),0);
@@ -670,10 +685,11 @@ on("#btnNormPct","click",()=>{const t=S.pack.percents.reduce((a,p)=>a+(+p.pct||0
 
 function renderRarityRows(){const box=$("#rarityRows");box.innerHTML="";
  S.pack.slots.forEach((s,i)=>{const d=document.createElement("div");d.className="row";d.style.marginBottom="6px";
-  d.innerHTML=`<input type="text" value="${esc(s.rarity)}" data-i="${i}" data-k="rarity" style="width:170px">
-   <input type="number" min="1" value="${s.count}" data-i="${i}" data-k="count" style="width:70px">
+  d.innerHTML=raritySelect(s.rarity,`data-i="${i}" data-k="rarity"`)+
+   `<input type="number" min="1" value="${s.count}" data-i="${i}" data-k="count" style="width:70px">
    <button class="btn small danger" data-del="${i}">✕</button>`;box.appendChild(d);});
- box.oninput=e=>{const i=+e.target.dataset.i,k=e.target.dataset.k;if(k==="rarity")S.pack.slots[i].rarity=e.target.value;if(k==="count")S.pack.slots[i].count=Math.max(1,+e.target.value||1);save();};
+ const upd=e=>{const i=+e.target.dataset.i,k=e.target.dataset.k;if(k==="rarity")S.pack.slots[i].rarity=e.target.value;if(k==="count")S.pack.slots[i].count=Math.max(1,+e.target.value||1);save();updateSlotTotal();};
+ box.oninput=upd;box.onchange=upd;
  box.onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){S.pack.slots.splice(+d,1);renderRarityRows();save();}};
  updateSlotTotal();}
 function updateSlotTotal(){const el=$("#slotTotal");if(!el)return;
@@ -981,6 +997,7 @@ async function libImport(url,label,setName){
  $("#libBar").style.width="100%";setTimeout(()=>$("#libBar").style.width="0%",1200);
  $("#libStatus").textContent=`${label}: ${entries.length} cards ${mode==="append"?"added":"loaded"} (pool: ${S.pool.length})`;
  $("#fetchStatus").textContent=`All card data cached ✓`;
+ renderRarityMode();
  toast(`${label} — ${entries.length} cards ready`);}
 function libFormat(fmt,label){libImport(API+"cardinfo.php?format="+encodeURIComponent(fmt),label);}
 function libEra(from,to,label){libImport(API+`cardinfo.php?startdate=${from}&enddate=${to}&dateregion=tcg_date`,label);}
@@ -1332,7 +1349,7 @@ async function ensureSource(entry){
   try{const r=await fetch(API+"cardinfo.php?"+q);const j=await r.json();
    if(j.error||!j.data||!j.data.length){lastErr=j.error||"no cards returned";continue;}
    const list=j.data.map(c=>{S.cardDB[c.name]=slimCard(c);return{name:c.name,rarity:firstRarity(c,entry.kind==="set"?entry.setName:null)};});
-   S.sourceCache[entry.label]=list;save();renderSources();
+   S.sourceCache[entry.label]=list;save();renderSources();renderRarityMode();
    toast(`${entry.label} ready — ${list.length} cards`);return list;}
   catch(e){lastErr=String(e.message||e);}}
  sourceError(entry.label,lastErr);return null;}
