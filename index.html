@@ -1509,7 +1509,61 @@ function runAuctionUI(type){stopTimers();
 <script>
 "use strict";
 /* ================= CPU DUELISTS ================= */
+/* ---- how good is this card, actually? ---- */
 const RVAL={common:1,rare:3,super:8,ultra:20,secret:45,ultimate:40,ghost:60};
+const RARITY_MULT={common:1,rare:1.05,super:1.15,ultra:1.3,secret:1.45,ultimate:1.4,ghost:1.5};
+// cards that are strong in almost any deck, across eras
+const STAPLES=["pot of greed","graceful charity","delinquent duo","painful choice","harpie's feather duster",
+ "raigeki","dark hole","heavy storm","mirror force","torrential tribute","solemn judgment","monster reborn",
+ "change of heart","snatch steal","premature burial","mystical space typhoon","book of moon","called by the grave",
+ "ash blossom","effect veiler","infinite impermanence","maxx \"c\"","nibiru","ghost ogre","ghost belle",
+ "droll & lock bird","triple tactics talent","evenly matched","forbidden droplet","lightning storm",
+ "bottomless trap hole","dimensional prison","compulsory evacuation device","solemn warning","skill drain",
+ "pot of desires","upstart goblin","reasoning","allure of darkness","scapegoat","sangan","witch of the black forest",
+ "black luster soldier - envoy of the beginning","chaos emperor dragon - envoy of the end","dark armed dragon",
+ "cyber dragon","thunder king rai-oh","honest","tour guide from the underworld","kycoo the ghost destroyer",
+ "exiled force","breaker the magical warrior","d.d. warrior lady","tsukuyomi","magician of faith","night assailant",
+ "spirit reaper","don zaloog","dust tornado","nobleman of crossout","smashing ground","enemy controller",
+ "pot of duality","gold sarcophagus","terraforming","foolish burial","instant fusion","one for one"];
+function textPower(d){if(!d)return 0;const t=d.toLowerCase();let p=0;
+ if(/draw (2|two|3|three)/.test(t))p+=5; else if(/draw 1 card|draw a card/.test(t))p+=2;
+ if(/add 1|add one/.test(t)&&/from your deck to your hand/.test(t))p+=4;      // searcher
+ if(/destroy all|shuffle all|banish all|return all/.test(t))p+=6;             // board wipe
+ if(/negate/.test(t))p+=4;
+ if(/target 1|destroy 1|banish 1/.test(t))p+=2.5;                             // spot removal
+ if(/special summon/.test(t))p+=2;
+ if(/cannot be destroyed|cannot be targeted|unaffected/.test(t))p+=2;
+ if(/take control/.test(t))p+=3;
+ if(/during your opponent's turn|quick effect/.test(t))p+=2;                  // interaction
+ if(/discard your entire hand|skip your|you lose|pay half/.test(t))p-=2;      // real drawbacks
+ if(/cannot be special summoned|must first be special summoned/.test(t))p-=1.5;
+ return p;}
+function cardPower(name){const c=cardOf(name);const t=(c.type||"").toLowerCase();
+ let p;
+ if(t.includes("spell"))p=3; else if(t.includes("trap"))p=2.5;
+ else if(t.includes("normal monster"))p=0.8;                                  // vanillas
+ else if(isExtra(c))p=2;                                                      // needs an engine
+ else p=3;                                                                    // effect monster
+ p+=textPower(c.desc);
+ if(!t.includes("spell")&&!t.includes("trap")){
+  p+=Math.min(3,(c.atk||0)/1000);
+  const lv=c.level||0;
+  if(lv>=7&&!/special summon/i.test(c.desc||""))p-=1.5;                       // clunky tribute fodder
+  if(lv<=4&&(c.atk||0)>=1800)p+=1;                                            // efficient beater
+ }
+ if(STAPLES.includes((c.name||name).toLowerCase()))p+=8;
+ return Math.max(0.4,p);}
+function cpuCardValue(name,rarity,pi){
+ let v=cardPower(name)*(RARITY_MULT[rarKey(rarity)]||1);
+ const p=S.players[pi];if(!p)return v;
+ const c=cardOf(name);
+ // archetype synergy: bots build toward what they already own
+ if(c.archetype){const owned=p.cards.filter(n=>cardOf(n).archetype===c.archetype).length;
+  if(owned)v+=Math.min(7,owned*1.3);}
+ // a 4th copy is unplayable
+ const copies=p.cards.filter(n=>n===name).length;
+ if(copies>=3)v*=0.35; else if(copies===2)v*=0.8;
+ return v;}
 const SKILL={chill:{mult:.72,delay:[1100,2600],noise:.18},normal:{mult:1,delay:[700,1900],noise:.14},shark:{mult:1.32,delay:[380,1200],noise:.10}};
 function isCPU(i){return !!(S.players[i]&&S.players[i].cpu);}
 function anyCPU(){return S.players.some(p=>p.cpu);}
@@ -1517,19 +1571,17 @@ function rnd(a,b){return a+Math.random()*(b-a);}
 function cpuMaxBid(pi){const p=S.players[pi],cp=S.currentPack;if(!p||!cp)return 0;
  const sk=SKILL[p.skill]||SKILL.normal;
  const cpp=cp.cards.length||1;
- // average value of an unknown card, from what this pack has shown so far
  const seen=cp.cards.filter((_,i)=>cp.revealed.includes(i));
- const seenAvg=seen.length?seen.reduce((a,c)=>a+(RVAL[rarKey(c.rarity)]||1),0)/seen.length:4;
+ const seenAvg=seen.length?seen.reduce((a,c)=>a+cpuCardValue(c.name,c.rarity,pi),0)/seen.length:4.5;
  let score=0;
- cp.cards.forEach((c,i)=>{score+=cp.revealed.includes(i)?(RVAL[rarKey(c.rarity)]||1):Math.min(seenAvg,6);});
- const expected=cpp*4; // a bland pack
+ cp.cards.forEach((c,i)=>{score+=cp.revealed.includes(i)?cpuCardValue(c.name,c.rarity,pi):Math.min(seenAvg,7);});
+ const expected=cpp*4.5;                                  // an unremarkable pack
  const ratio=Math.max(.25,Math.min(3,score/expected));
  const packsLeft=Math.max(1,S.pack.num-S.packsOpened+1);
  const share=Math.max(1,Math.ceil(packsLeft/Math.max(1,S.players.length)));
  const budget=p.money/share;
  let max=budget*ratio*sk.mult*rnd(1-sk.noise,1+sk.noise);
- // keep a reserve until the final pack, so the endgame isn't always an all-in
- const reserve=packsLeft<=1?1:packsLeft<=3?.8:.6;
+ const reserve=packsLeft<=1?1:packsLeft<=3?.8:.6;         // hold something back until the end
  max=Math.min(max,p.money*reserve);
  if(p.money<=3)max=Math.min(max,p.money);
  return Math.max(0,Math.min(p.money,Math.round(max)));}
