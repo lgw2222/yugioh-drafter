@@ -431,8 +431,16 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <option value="pool">Use imported pool</option>
           <option value="fixed">Lock one source</option>
           <option value="wheel">Spin the source wheel</option>
+          <option value="combined">Combine all sources into one set</option>
         </select>
         <select id="srcFixed" hidden></select>
+      </div>
+      <div id="srcCombinedWrap" hidden>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn gold small" id="btnBuildCombined">Build / rebuild combined set</button>
+          <span class="pill" id="combinedPill">Not built yet</span>
+        </div>
+        <div class="muted" id="combinedBreakdown" style="font-size:13px"></div>
       </div>
       <div id="srcWheelWrap" hidden>
         <div class="wheel-wrap" style="width:min(300px,72vw)">
@@ -589,7 +597,7 @@ function freshState(){return{
  pack:{cpp:8,num:24,seed:"",slots:[{rarity:"Secret Rare",count:1},{rarity:"Ultra Rare",count:1}],
   rarityMode:"slots",simpleRarities:false,
   percents:[{rarity:"Common",pct:70},{rarity:"Rare",pct:16},{rarity:"Super Rare",pct:8},{rarity:"Ultra Rare",pct:4},{rarity:"Secret Rare",pct:2}]},
- sources:{mode:"pool",fixed:"",entries:[]}, sourceCache:{}, sourcePresets:{}, customModes:{}, finished:false, started:false, modeName:"", introSeq:0,
+ sources:{mode:"pool",fixed:"",entries:[]}, sourceCache:{}, combinedSig:"", sourcePresets:{}, customModes:{}, finished:false, started:false, modeName:"", introSeq:0,
  packsOpened:0, currentPack:null, pendingAuction:null,
  wheel:{entries:JSON.parse(JSON.stringify(DEFAULT_WHEEL)),sound:true,history:[]},
  wheelPresets:{}, history:[], rngState:null };}
@@ -1138,7 +1146,9 @@ function renderSourceControls(){
  $("#srcFixed").hidden=S.sources.mode!=="fixed";
  $("#srcFixed").innerHTML=S.sources.entries.map(e=>`<option ${e.label===S.sources.fixed?"selected":""}>${esc(e.label)}</option>`).join("");
  $("#srcWheelWrap").hidden=S.sources.mode!=="wheel";
+ $("#srcCombinedWrap").hidden=S.sources.mode!=="combined";
  if(S.sources.mode==="wheel")drawSourceWheel();
+ if(S.sources.mode==="combined")renderCombinedInfo();
  if(!has&&S.sources.mode==="fixed"){S.sources.mode="pool";$("#srcMode").value="pool";$("#srcFixed").hidden=true;}
  renderSourceNote();}
 function renderSourceNote(){const el=$("#srcNote");if(!el)return;
@@ -1147,6 +1157,9 @@ function renderSourceNote(){const el=$("#srcNote");if(!el)return;
  else if(m==="fixed")el.textContent=S.sources.entries.length
    ?`Every pack comes from ${S.sources.fixed||S.sources.entries[0].label}.`
    :`No sources added yet — add booster sets or eras on the Cards tab.`;
+ else if(m==="combined"){const n=(S.sourceCache[COMBINED_KEY]||[]).length;
+  el.textContent=n?`Every pack is drawn from one merged set of ${n} cards — rarity odds come from the real mix of everything you added.`
+   :`Combines every pack source (and your imported pool) into a single set with its own natural rarity ratios. Build it to see the mix.`;}
  else if(!ents.length)el.textContent=`Nothing to spin yet — import a pool or add pack sources on the Cards tab.`;
  else if(srcChoiceEntry)el.textContent=`Next pack comes from ${srcChoiceEntry.label}.`;
  else el.textContent=`On the wheel: ${ents.map(e=>e.label).join(", ")}. Spin to pick where the next pack comes from.`;}
@@ -1177,6 +1190,7 @@ function spinSourceWheel(){const ents=wheelSources();
   else{srcSpinning=false;srcChoiceEntry=ents[idx];$("#srcResult").textContent=ents[idx].label;
    fanfare();renderSourceNote();dlog("source wheel: "+ents[idx].label);maybeAutoOpen();}}
  requestAnimationFrame(frame);}
+on("#btnBuildCombined","click",()=>ensureCombined(true));
 on("#srcHub","click",spinSourceWheel);
 on("#srcHub","keydown",e=>{if(e.key==="Enter"||e.key===" ")spinSourceWheel();});
 
@@ -1366,6 +1380,35 @@ function sourceError(label,why){
   <p class="muted" style="margin:10px 0">Couldn't pull <b>${esc(label)}</b> from YGOPRODeck${why?` — ${esc(String(why).slice(0,90))}`:""}.</p>
   <p class="muted">Spin again for a different source, or remove it on the Cards tab.</p>
   <div class="row" style="justify-content:center;margin-top:14px"><button class="btn" onclick="renderAuctionIdle()">OK</button></div>`;}
+const COMBINED_KEY="__combined__";
+function combinedSignature(){return S.sources.entries.map(e=>e.label).sort().join("|")+"#"+(S.pool.length?"pool":"nopool");}
+async function ensureCombined(rebuild){
+ const have=S.sourceCache[COMBINED_KEY]||[];
+ if(!rebuild&&have.length&&S.combinedSig===combinedSignature())return have;
+ if(!S.sources.entries.length&&!S.pool.length){toast("Add pack sources on the Cards tab first",true);return null;}
+ const parts=[];
+ for(const e of S.sources.entries){
+  const l=await ensureSource(e);
+  if(l)parts.push(...l.map(c=>({name:c.name,rarity:c.rarity,from:e.label})));}
+ if(S.pool.length)parts.push(...S.pool.map(c=>({name:c.name,rarity:c.rarity,from:"Imported Pool"})));
+ if(!parts.length){toast("Nothing loaded to combine",true);return null;}
+ S.sourceCache[COMBINED_KEY]=shuffle(parts,Math.random);
+ S.combinedSig=combinedSignature();save();
+ renderCombinedInfo();
+ toast(`Combined set built — ${parts.length} cards`);
+ return S.sourceCache[COMBINED_KEY];}
+function renderCombinedInfo(){
+ const list=S.sourceCache[COMBINED_KEY]||[];
+ const pill=$("#combinedPill"),bd=$("#combinedBreakdown");
+ if(!pill)return;
+ if(!list.length){pill.textContent="Not built yet";pill.className="pill";if(bd)bd.textContent="";return;}
+ pill.textContent=`${list.length} cards left`;pill.className="pill ok";
+ const byR={},byS={};
+ list.forEach(c=>{const k=normRar(c.rarity);byR[k]=(byR[k]||0)+1;byS[c.from||"?"]=(byS[c.from||"?"]||0)+1;});
+ const rar=Object.entries(byR).sort((a,b)=>b[1]-a[1]).slice(0,6)
+  .map(([k,v])=>`${esc(k)} ${(v/list.length*100).toFixed(1)}%`).join(" · ");
+ const src=Object.entries(byS).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${esc(k)} (${v})`).join(", ");
+ if(bd)bd.innerHTML=`<div><b>Rarity mix:</b> ${rar}</div><div style="margin-top:4px"><b>From:</b> ${src}</div>`;}
 function sourceRemaining(label){const e=S.sources.entries.find(x=>x.label===label);
  if(!e)return S.pool.length;return (S.sourceCache[label]||[]).length;}
 
@@ -1376,6 +1419,9 @@ on("#btnUseResult","click",()=>{if(!wheelChoice)return;startAuction(wheelChoice)
 async function pickSource(){
  const m=S.sources.mode;
  if(m==="pool")return{label:"",list:S.pool,set(v){S.pool=v;}};
+ if(m==="combined"){const list=await ensureCombined(false);
+  if(!list)return null;
+  return{label:"Combined Set",list,set(v){S.sourceCache[COMBINED_KEY]=v;renderCombinedInfo();}};}
  let entry=null;
  if(m==="fixed")entry=S.sources.entries.find(e=>e.label===S.sources.fixed)||S.sources.entries[0];
  else{const ents=wheelSources();if(!ents.length)return{label:"",list:S.pool,set(v){S.pool=v;}};
@@ -1612,7 +1658,8 @@ function runSealed(type){const cur=S.settings.currency;
     <button class="btn small gold" onclick="sealBid(${i})">Lock in</button></div></div>`).join("")}</div>
   <div class="row" style="justify-content:center;margin-top:16px">
    <button class="btn big gold" id="btnReveal" disabled onclick="revealSealed()">Reveal all bids</button>
-   <button class="btn danger small" onclick="cancelPack()">Cancel pack</button></div>`;}
+   <button class="btn danger small" onclick="cancelPack()">Cancel pack</button></div>`;
+ cpuSealed();}
 function toggleMask(cb){S.settings.maskBids=cb.checked;save();$$("input[id^=secb]").forEach(i=>i.type=cb.checked?"password":"number");}
 function sealBid(i){const v=Math.floor(+$("#secb"+i).value);sealApply(i,v,true);}
 function sealApply(i,v,localToast){const p=S.players[i];
